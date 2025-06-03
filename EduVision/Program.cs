@@ -1,14 +1,54 @@
+using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Services;
+using Microsoft.EntityFrameworkCore;
+using System.Diagnostics;
 using Xabe.FFmpeg;
 
-//FFmpeg.SetExecutablesPath("path/to/ffmpeg-folder");
-FFmpeg.SetExecutablesPath(@"C:\tools\bin");
+////FFmpeg.SetExecutablesPath("path/to/ffmpeg-folder");
+//FFmpeg.SetExecutablesPath(@"C:\tools\bin");
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration
     //.AddJsonFile("appsettings.Secrets.json", optional: true, reloadOnChange: true)
     .AddJsonFile("Secrets/appsettings.Secrets.json", optional: true, reloadOnChange: true);
+
+// Configure FFmpeg path from configuration
+var ffmpegPath = builder.Configuration["FFmpeg:ExecutablesPath"];
+if (!string.IsNullOrEmpty(ffmpegPath))
+{
+    // Convert relative path to absolute for Azure
+    if (!Path.IsPathRooted(ffmpegPath))
+    {
+        ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), ffmpegPath);
+    }
+    FFmpeg.SetExecutablesPath(ffmpegPath);
+}
+
+// After setting the FFmpeg path in production
+if (!builder.Environment.IsDevelopment())
+{
+    var ffmpegBinary = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "ffmpeg", "ffmpeg");
+    if (File.Exists(ffmpegBinary))
+    {
+        try
+        {
+            // Set execute permission for Linux
+            var processInfo = new ProcessStartInfo("chmod", $"+x {ffmpegBinary}")
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            using var process = Process.Start(processInfo);
+            process?.WaitForExit();
+        }
+        catch (Exception ex)
+        {
+            // Log the error but don't fail startup
+            Console.WriteLine($"Warning: Could not set execute permissions for FFmpeg: {ex.Message}");
+        }
+    }
+}
 
 // Add services to the container.
 
@@ -32,6 +72,9 @@ builder.Services.AddSingleton<SlideCaptureService>();
 builder.Services.AddSingleton<VideoGenerationService>();
 builder.Services.Configure<ScreenshotApiConfig>(
     builder.Configuration.GetSection("ScreenshotApi"));
+
+builder.Services.AddDbContext<EduVisionContext>(options =>
+    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
 

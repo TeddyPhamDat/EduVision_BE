@@ -61,29 +61,61 @@ namespace EduVision.Services
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
             var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
-            HttpResponseMessage response;
-            try
-            {
-                response = await _httpClient.PostAsync(endpoint, content);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Request failed.");
-                return new List<LessonSlide>
-                {
-                    new LessonSlide { Title = "Error", Content = $"Request failed: {ex.Message}" }
-                };
-            }
 
-            var responseBody = await response.Content.ReadAsStringAsync();
+            const int maxRetries = 10;
+            int retryCount = 0;
+            int delayMs = 1000;
 
-            if (!response.IsSuccessStatusCode)
+            HttpResponseMessage response = null!;
+            string responseBody = string.Empty;
+
+            while (retryCount <= maxRetries)
             {
-                _logger.LogError("Gemini API failed: {StatusCode} - {ResponseBody}", response.StatusCode, responseBody);
-                return new List<LessonSlide>
+                try
                 {
-                    new LessonSlide { Title = "Error", Content = $"Gemini API failed: {response.StatusCode} - {responseBody}" }
-                };
+                    response = await _httpClient.PostAsync(endpoint, content);
+                    responseBody = await response.Content.ReadAsStringAsync();
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        break; // Success, exit retry loop
+                    }
+
+                    // Retry only on 503 (Service Unavailable)
+                    if ((int)response.StatusCode == 503)
+                    {
+                        retryCount++;
+                        if (retryCount > maxRetries)
+                        {
+                            _logger.LogError("Gemini API repeatedly unavailable (503) after {MaxRetries} retries.", maxRetries);
+                            return new List<LessonSlide>
+                            {
+                                new LessonSlide { Title = "Error", Content = $"Gemini API unavailable (503) after {maxRetries} retries." }
+                            };
+                        }
+                        _logger.LogWarning("Gemini API unavailable (503). Retrying {RetryCount}/{MaxRetries}...", retryCount, maxRetries);
+                        await Task.Delay(delayMs);
+                        delayMs *= 2; // Exponential backoff
+                        continue;
+                    }
+                    else
+                    {
+                        // For other errors, do not retry
+                        _logger.LogError("Gemini API failed: {StatusCode} - {ResponseBody}", response.StatusCode, responseBody);
+                        return new List<LessonSlide>
+                        {
+                            new LessonSlide { Title = "Error", Content = $"Gemini API failed: {response.StatusCode} - {responseBody}" }
+                        };
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Request failed.");
+                    return new List<LessonSlide>
+                    {
+                        new LessonSlide { Title = "Error", Content = $"Request failed: {ex.Message}" }
+                    };
+                }
             }
 
             try
@@ -142,4 +174,3 @@ namespace EduVision.Services
         }
     }
 }
-

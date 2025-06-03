@@ -1,6 +1,7 @@
 ﻿using CloudinaryDotNet;
 using CloudinaryDotNet.Actions;
 using Microsoft.AspNetCore.Http;
+using System.Security.Cryptography;
 
 namespace EduVision.Services
 {
@@ -21,12 +22,29 @@ namespace EduVision.Services
 
         public async Task<List<string>> GetImagesByCategoryAsync(string category, int limit = 5)
         {
+            // Fetch up to 100 images (adjust as needed)
             var result = await _cloudinary.Search()
                 .Expression($"folder:{category}")
-                .MaxResults(limit)
+                .MaxResults(100)
                 .ExecuteAsync();
 
-            return result.Resources.Select(r => r.SecureUrl.ToString()).ToList();
+            var allImages = result.Resources.Select(r => r.SecureUrl.ToString()).ToList();
+
+            // Shuffle the list
+            var rng = RandomNumberGenerator.Create();
+            int n = allImages.Count;
+            while (n > 1)
+            {
+                byte[] box = new byte[1];
+                do rng.GetBytes(box);
+                while (!(box[0] < n * (Byte.MaxValue / n)));
+                int k = (box[0] % n);
+                n--;
+                (allImages[n], allImages[k]) = (allImages[k], allImages[n]);
+            }
+
+            // Take the first 'limit' images
+            return allImages.Take(limit).ToList();
         }
 
         public async Task<string> UploadImageAsync(IFormFile file, string category)

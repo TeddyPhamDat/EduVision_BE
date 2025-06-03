@@ -25,7 +25,7 @@ namespace EduVision.Services
             var tasks = Enumerable.Range(0, slideCount).Select(async i =>
             {
                 var slideUrl = $"{revealHtmlUrl}#/{i}";
-                var apiUrl = $"https://shot.screenshotapi.net/screenshot?token={_screenshotApiKey}&url={Uri.EscapeDataString(slideUrl)}&output=image&file_type=png&wait_for_event=load";
+                var apiUrl = $"https://shot.screenshotapi.net/screenshot?token={_screenshotApiKey}&url={Uri.EscapeDataString(slideUrl)}&output=image&file_type=png&wait_for_event=load&viewport_width=1920&viewport_height=1080";
                 var imageBytes = await httpClient.GetByteArrayAsync(apiUrl);
 
                 var blobName = $"presentations/{lessonId}/images/{i}.png";

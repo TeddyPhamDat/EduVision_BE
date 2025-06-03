@@ -22,7 +22,6 @@ Thumbs.db
 ehthumbs.db
 
 # ASP.NET generated folders
-wwwroot/
 .vs/
 
 # Secrets and sensitive data

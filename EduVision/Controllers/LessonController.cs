@@ -1,8 +1,9 @@
-﻿using EduVision.Models;
+﻿using EduVision.DBContext;
+using EduVision.Models;
 using EduVision.Services;
 using Microsoft.AspNetCore.Mvc;
-using System.Diagnostics;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace EduVision.Controllers
 {
@@ -16,6 +17,7 @@ namespace EduVision.Controllers
         private readonly TextToSpeechService _ttsService;
         private readonly SlideCaptureService _slideCaptureService;
         private readonly VideoGenerationService _videoGenerationService;
+        private readonly EduVisionContext _dbContext;
 
         public LessonController(
             GeminiService geminiService,
@@ -23,6 +25,7 @@ namespace EduVision.Controllers
             RevealJsGenerator revealJsGenerator,
             TextToSpeechService ttsService,
             SlideCaptureService slideCaptureService,
+            EduVisionContext dbContext,
             VideoGenerationService videoGenerationService)
         {
             _geminiService = geminiService;
@@ -30,6 +33,7 @@ namespace EduVision.Controllers
             _revealJsGenerator = revealJsGenerator;
             _ttsService = ttsService;
             _slideCaptureService = slideCaptureService;
+            _dbContext = dbContext;
             _videoGenerationService = videoGenerationService;
         }
 
@@ -85,6 +89,54 @@ namespace EduVision.Controllers
 
             // After capturing images and audio
             var videoUrl = await _videoGenerationService.GenerateVideoAsync(slides, lessonId);
+
+            using var transaction = await _dbContext.Database.BeginTransactionAsync();
+            try
+            {
+                // 1. Save Prompt
+                var promptEntity = new Prompt
+                {
+                    UserId = 4, // Use "member" user
+                    Content = request.Prompt,
+                    CreatedAt = DateTime.UtcNow,
+                    Status = "Completed"
+                };
+                _dbContext.Prompts.Add(promptEntity);
+                await _dbContext.SaveChangesAsync();
+
+                // 2. Save Slides
+                var slideEntities = slides.Select((slide, i) => new Slide
+                {
+                    PromptId = promptEntity.Promptid,
+                    UserId = 4, // Use "member" user
+                    Type = "AI",
+                    Url = slide.CapturedImageUrl ?? slide.ImageUrl ?? "",
+                    Status = "Completed"
+                }).ToList();
+
+                _dbContext.Slides.AddRange(slideEntities);
+                await _dbContext.SaveChangesAsync();
+
+                // 3. Save GeneratedVideo
+                var videoEntity = new GeneratedVideo
+                {
+                    PromptId = promptEntity.Promptid,
+                    SlideId = slideEntities.FirstOrDefault()?.SlideId,
+                    Status = "Completed",
+                    CreatedAt = DateTime.UtcNow,
+                    VideoUrl = videoUrl,
+                };
+                _dbContext.GeneratedVideos.Add(videoEntity);
+                await _dbContext.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
 
             totalSw.Stop();
             logger?.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
