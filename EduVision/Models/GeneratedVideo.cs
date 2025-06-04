@@ -15,10 +15,6 @@ public partial class GeneratedVideo
 
     public string Status { get; set; }
 
-    public int? DurationSec { get; set; }
-
-    public string Resolution { get; set; }
-
     public DateTime? CreatedAt { get; set; }
 
     public string VideoUrl { get; set; }

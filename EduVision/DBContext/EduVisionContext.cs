@@ -59,11 +59,7 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.CreatedAt)
                 .HasColumnType("datetime")
                 .HasColumnName("created_at");
-            entity.Property(e => e.DurationSec).HasColumnName("duration_sec");
             entity.Property(e => e.PromptId).HasColumnName("prompt_id");
-            entity.Property(e => e.Resolution)
-                .HasMaxLength(50)
-                .HasColumnName("resolution");
             entity.Property(e => e.SlideId).HasColumnName("slide_id");
             entity.Property(e => e.Status)
                 .HasMaxLength(50)

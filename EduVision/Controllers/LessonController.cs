@@ -2,7 +2,6 @@
 using EduVision.Models;
 using EduVision.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 
 namespace EduVision.Controllers
@@ -96,7 +95,7 @@ namespace EduVision.Controllers
                 // 1. Save Prompt
                 var promptEntity = new Prompt
                 {
-                    UserId = 4, // Use "member" user
+                    UserId = 3, // Use "member" user
                     Content = request.Prompt,
                     CreatedAt = DateTime.UtcNow,
                     Status = "Completed"
@@ -108,7 +107,7 @@ namespace EduVision.Controllers
                 var slideEntities = slides.Select((slide, i) => new Slide
                 {
                     PromptId = promptEntity.Promptid,
-                    UserId = 4, // Use "member" user
+                    UserId = 3, // Use "member" user
                     Type = "AI",
                     Url = slide.CapturedImageUrl ?? slide.ImageUrl ?? "",
                     Status = "Completed"
