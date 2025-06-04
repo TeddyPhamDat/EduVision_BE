@@ -130,7 +130,15 @@ namespace EduVision.Controllers
                 try
                 {
                     sw.Restart();
-                    slideUrl = await _revealJsGenerator.GenerateRevealHtmlAsync(slides, lessonId);
+                    int template = request.Template;
+                    string templateName = template switch
+                    {
+                        2 => "RevealTemplateDark.html",
+                        3 => "RevealTemplateModern.html",
+                        1 => "RevealTemplate.html",
+                        _ => "RevealTemplateDark.html"
+                    };
+                    slideUrl = await _revealJsGenerator.GenerateRevealHtmlAsync(slides, lessonId, templateName);
                     sw.Stop();
                     _logger.LogInformation("Reveal.js HTML generation: {Elapsed} ms", sw.ElapsedMilliseconds);
                 }

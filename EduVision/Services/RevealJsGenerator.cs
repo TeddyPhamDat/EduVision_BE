@@ -16,23 +16,76 @@ namespace EduVision.Services
             _blobStorage = blobStorage;
         }
 
-        public async Task<string> GenerateRevealHtmlAsync(List<LessonSlide> slides, string outputFilename)
+        public async Task<string> GenerateRevealHtmlAsync(List<LessonSlide> slides, string outputFilename, string templateName = "RevealTemplate.html")
         {
             var slideHtml = new StringBuilder();
 
             foreach (var slide in slides)
             {
-                slideHtml.AppendLine("<section>");
-                if (!string.IsNullOrEmpty(slide.ImageUrl))
+                switch (templateName)
                 {
-                    slideHtml.AppendLine($"<img src=\"{slide.ImageUrl}\" style=\"max-height: 300px; display:block; margin:auto;\"/>");
+                    case "RevealTemplateDark.html":
+                        slideHtml.AppendLine("<section>");
+                        if (!string.IsNullOrEmpty(slide.ImageUrl))
+                            slideHtml.AppendLine($"<img class=\"slide-image\" src=\"{slide.ImageUrl}\" style=\"max-height: 320px; display:block; margin:auto;\"/>");
+                        slideHtml.AppendLine($"<h2 class=\"slide-title\">{slide.Title}</h2>");
+                        slideHtml.AppendLine($"<p class=\"slide-content\">{slide.Content}</p>");
+                        slideHtml.AppendLine("</section>");
+                        break;
+
+                    case "RevealTemplateModern.html":
+                        slideHtml.AppendLine("<section>");
+                        slideHtml.AppendLine("<div class=\"slide-flex\">");
+                        // Image panel (optional)
+                        if (!string.IsNullOrEmpty(slide.ImageUrl))
+                        {
+                            slideHtml.AppendLine("<div class=\"slide-image-panel\">");
+                            slideHtml.AppendLine($"<img class=\"slide-image\" src=\"{slide.ImageUrl}\" alt=\"Slide image\" />");
+                            slideHtml.AppendLine("</div>");
+                        }
+                        // Content panel
+                        slideHtml.AppendLine("<div class=\"slide-content-panel\">");
+                        slideHtml.AppendLine($"<div class=\"slide-title\">{slide.Title}</div>");
+                        slideHtml.AppendLine($"<div class=\"slide-content\">{slide.Content}</div>");
+                        slideHtml.AppendLine("</div>");
+                        slideHtml.AppendLine("</div>");
+                        slideHtml.AppendLine("</section>");
+                        break;
+
+
+                    case "RevealTemplate.html":
+                        slideHtml.AppendLine("<section>");
+                        slideHtml.AppendLine("<div class=\"custom-card\">"); // Add this wrapper
+                                                                             // Left panel: Title and Content
+                        slideHtml.AppendLine("<div class=\"custom-left\">");
+                        slideHtml.AppendLine($"<div class=\"custom-title\">{slide.Title}</div>");
+                        slideHtml.AppendLine($"<div class=\"custom-content\">{slide.Content}</div>");
+                        slideHtml.AppendLine("</div>");
+                        // Only render right panel if image exists
+                        if (!string.IsNullOrEmpty(slide.ImageUrl))
+                        {
+                            slideHtml.AppendLine("<div class=\"custom-right\">");
+                            slideHtml.AppendLine("<div class=\"custom-image-frame\">");
+                            slideHtml.AppendLine($"<img src=\"{slide.ImageUrl}\" alt=\"Slide image\" />");
+                            slideHtml.AppendLine("</div>");
+                            slideHtml.AppendLine("</div>"); // close custom-right
+                        }
+                        slideHtml.AppendLine("</div>"); // Close the custom-card wrapper
+                        slideHtml.AppendLine("</section>");
+                        break;
+
+                    default: 
+                        slideHtml.AppendLine("<section>");
+                        if (!string.IsNullOrEmpty(slide.ImageUrl))
+                            slideHtml.AppendLine($"<img class=\"slide-image\" src=\"{slide.ImageUrl}\" style=\"max-height: 320px; display:block; margin:auto;\"/>");
+                        slideHtml.AppendLine($"<h2 class=\"slide-title\">{slide.Title}</h2>");
+                        slideHtml.AppendLine($"<p class=\"slide-content\">{slide.Content}</p>");
+                        slideHtml.AppendLine("</section>");
+                        break;
                 }
-                slideHtml.AppendLine($"<h2>{slide.Title}</h2>");
-                slideHtml.AppendLine($"<p>{slide.Content}</p>");
-                slideHtml.AppendLine("</section>");
             }
 
-            var templatePath = Path.Combine(_env.ContentRootPath, "Testing", "RevealTemplate.html");
+            var templatePath = Path.Combine(_env.ContentRootPath, "Testing", templateName);
             var template = await File.ReadAllTextAsync(templatePath);
 
             var fullHtml = template.Replace("{{slides}}", slideHtml.ToString());

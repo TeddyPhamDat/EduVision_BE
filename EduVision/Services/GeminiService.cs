@@ -106,7 +106,7 @@ namespace EduVision.Services
 
                 Each slide should have:
                 - "title": a concise, descriptive title in Vietnamese
-                - "content": a 2-3 sentence explanation in Vietnamese that summarizes key concepts from the textbook
+                - "content": a 4-5 sentence explanation in Vietnamese that summarizes key concepts from the textbook
 
                 The slides should cover the most important points from the textbook content, presented in a logical order.
 

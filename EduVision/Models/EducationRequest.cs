@@ -12,6 +12,8 @@ namespace EduVision.Models
         
         public int? Grade { get; set; }
         
-        public string ImageCategory { get; set; } = "education";
+        public string ImageCategory { get; set; } = string.Empty;
+        
+        public int Template { get; set; } = 1; // 1=default, 2=dark, 3=modern
     }
 }

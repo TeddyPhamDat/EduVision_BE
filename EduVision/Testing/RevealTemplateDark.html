@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Lesson Presentation - Dark</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/reveal.js/dist/reveal.css">
+    <link rel="stylesheet" href="https://unpkg.com/reveal.js/dist/theme/black.css">
+    <style>
+        body { background: #181818; color: #fff; }
+        .slide-title { color: #ffeb3b; }
+        .slide-content { color: #fff; }
+        .slide-image { border: 3px solid #ffeb3b; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            {{slides}}
+        </div>
+    </div>
+    <script src="https://unpkg.com/reveal.js/dist/reveal.js"></script>
+    <script>Reveal.initialize({ width: 1920, height: 1080 });</script>
+</body>
+</html>
