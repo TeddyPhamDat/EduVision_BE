@@ -11,7 +11,7 @@ namespace EduVision.Services
 
         public AzureBlobStorageService(IConfiguration config)
         {
-            _connectionString = config["AzureBlob:ConnectionString"];
+            _connectionString = config["AzureBlob:ConnectionString"] ?? throw new ArgumentNullException("Azure:BlobConnectionString is missing in configuration");
             _containerName = config["AzureBlob:Container"] ?? "presentations";
         }
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+
 namespace EduVision.Services
 {
     public class GeminiService
@@ -11,12 +12,18 @@ namespace EduVision.Services
         private readonly HttpClient _httpClient;
         private readonly string? _apiKey;
         private readonly ILogger<GeminiService> _logger;
+        private readonly MongoDbService? _mongoDbService;
 
-        public GeminiService(HttpClient httpClient, IOptions<GeminiConfig> config, ILogger<GeminiService> logger)
+        public GeminiService(
+            HttpClient httpClient,
+            IOptions<GeminiConfig> config,
+            ILogger<GeminiService> logger,
+            MongoDbService? mongoDbService = null)
         {
             _httpClient = httpClient;
             _apiKey = config.Value.ApiKey;
             _logger = logger;
+            _mongoDbService = mongoDbService;
         }
 
         public async Task<List<LessonSlide>> GenerateSlidesAsync(string prompt)
@@ -45,13 +52,91 @@ namespace EduVision.Services
             ]
             """;
 
+            return await SendGeminiRequestAsync(fullPrompt);
+        }
+
+        public async Task<List<LessonSlide>> GenerateEducationSlidesAsync(string subject, string chapter, int? grade = null)
+        {
+            if (string.IsNullOrWhiteSpace(_apiKey))
+            {
+                _logger.LogError("API key is missing.");
+                return new List<LessonSlide>
+                {
+                    new LessonSlide { Title = "Error", Content = "API key is missing." }
+                };
+            }
+
+            if (_mongoDbService == null)
+            {
+                _logger.LogWarning("MongoDB service not available. Using standard prompt without context.");
+                return await GenerateSlidesAsync($"{subject} - {chapter}");
+            }
+
+            try
+            {
+                // Get content from MongoDB based on subject, chapter, and grade
+                var content = await _mongoDbService.GetContentAsync(subject, chapter, grade);
+                var metadata = await _mongoDbService.GetMetadataAsync(subject, chapter, grade);
+
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    _logger.LogWarning("No content found for {Subject}, {Chapter}, Grade {Grade}. Using standard prompt.",
+                        subject, chapter, grade);
+                    return await GenerateSlidesAsync($"{subject} - {chapter}");
+                }
+
+                _logger.LogInformation("Found {Length} characters of content for {Subject}, {Chapter}, Grade {Grade}",
+                    content.Length, subject, chapter, grade);
+
+                // Trim content if it's too long for the API
+                string trimmedContent = content;
+                if (content.Length > 8000)
+                {
+                    trimmedContent = content.Substring(0, 8000) + "... (content truncated due to length)";
+                    _logger.LogInformation("Content truncated from {OriginalLength} to 8000 characters", content.Length);
+                }
+
+                // Create a prompt that uses the educational content as context
+                string title = metadata?.Title ?? chapter;
+                string fullPrompt = $$"""
+                Create a JSON array of 5 educational slides about the Vietnamese subject "{{subject}}" chapter "{{title}}".
+                Use the following textbook content as the authoritative source for the slides:
+
+                {{trimmedContent}}
+
+                Each slide should have:
+                - "title": a concise, descriptive title in Vietnamese
+                - "content": a 2-3 sentence explanation in Vietnamese that summarizes key concepts from the textbook
+
+                The slides should cover the most important points from the textbook content, presented in a logical order.
+
+                Format:
+                [
+                  { "title": "Slide 1 Title", "content": "Slide 1 content..." },
+                  { "title": "Slide 2 Title", "content": "Slide 2 content..." },
+                  ...
+                ]
+                """;
+
+                return await SendGeminiRequestAsync(fullPrompt);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating slides with MongoDB content for {Subject}, {Chapter}, Grade {Grade}",
+                    subject, chapter, grade);
+                return await GenerateSlidesAsync($"{subject} - {chapter}");
+            }
+        }
+
+        private async Task<List<LessonSlide>> SendGeminiRequestAsync(string prompt)
+        {
             var requestBody = new
             {
                 contents = new[]
                 {
                     new {
                         parts = new[] {
-                            new { text = fullPrompt }
+                            new { text = prompt }
                         }
                     }
                 }
@@ -149,10 +234,19 @@ namespace EduVision.Services
                         }
                     }
 
-                    var slides = JsonSerializer.Deserialize<List<LessonSlide>>(text,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                    return slides ?? new List<LessonSlide>();
+                    if (!string.IsNullOrEmpty(text))
+                    {
+                        var slides = JsonSerializer.Deserialize<List<LessonSlide>>(text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        return slides ?? new List<LessonSlide>();
+                    }
+                    else
+                    {
+                        _logger.LogError("Extracted text is null or empty.");
+                        return new List<LessonSlide>
+                        {
+                            new LessonSlide { Title = "Parse Error", Content = "Extracted text is null or empty." }
+                        };
+                    }
                 }
                 else
                 {

@@ -157,7 +157,7 @@ namespace EduVision.Controllers
             {
                 slide.ImageUrl = imageUrls[i % imageUrls.Count];
                 var audioBlobName = $"presentations/{lessonId}/audio/{i}.wav";
-                slide.AudioUrl = await _ttsService.GenerateAudioAsync(slide.Content, audioBlobName);
+                slide.AudioUrl = await _ttsService.GenerateAudioAsync(slide.Content ?? string.Empty, audioBlobName);
             }));
             await Task.WhenAll(assetTasks);
         }

@@ -2,6 +2,7 @@ using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Diagnostics;
 using Xabe.FFmpeg;
 
@@ -58,15 +59,33 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 //------------------------------------------------------------// Add custom services
+// Register MongoDbConfig before MongoDbService
+builder.Services.AddOptions<MongoDbConfig>()
+    .Bind(builder.Configuration.GetSection("MongoDB"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+// Register MongoDbService as a singleton
+builder.Services.AddSingleton<MongoDbService>();
+
 builder.Services.AddOptions<GeminiConfig>()
     .Bind(builder.Configuration.GetSection("Gemini"))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddSingleton<GeminiService>();
-builder.Services.AddHttpClient<GeminiService>();
+
+// Update the registration for GeminiService
+builder.Services.AddSingleton<GeminiService>(sp => 
+{
+    var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
+    var options = sp.GetRequiredService<IOptions<GeminiConfig>>();
+    var logger = sp.GetRequiredService<ILogger<GeminiService>>();
+    var mongoDbService = sp.GetRequiredService<MongoDbService>();
+    return new GeminiService(httpClient, options, logger, mongoDbService);
+});
+
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<CloudinaryImageService>();
 builder.Services.AddSingleton<RevealJsGenerator>();
-builder.Services.AddSingleton<TextToSpeechService>();
 builder.Services.AddSingleton<AzureBlobStorageService>();
 builder.Services.AddSingleton<SlideCaptureService>();
 builder.Services.AddSingleton<VideoGenerationService>();
@@ -75,6 +94,9 @@ builder.Services.Configure<ScreenshotApiConfig>(
 
 builder.Services.AddDbContext<EduVisionContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Replace the existing TextToSpeechService registration
+builder.Services.AddSingleton<TextToSpeechService>();
 
 var app = builder.Build();
 
