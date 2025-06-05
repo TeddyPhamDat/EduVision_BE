@@ -248,13 +248,55 @@ namespace EduVision.Services
 
                     if (!string.IsNullOrEmpty(text))
                     {
-                        var slides = JsonSerializer.Deserialize<List<LessonSlideDto>>(text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                        return new SlideGenerationResultDto
+                        // Remove code block markers if present
+                        text = text.Trim();
+                        if (text.StartsWith("```"))
                         {
-                            ErrorCode = "Success",
-                            Slides = slides ?? new List<LessonSlideDto>(),
-                            HttpStatusCode = 200
-                        };
+                            var firstNewline = text.IndexOf('\n');
+                            if (firstNewline >= 0)
+                                text = text.Substring(firstNewline + 1);
+                            if (text.EndsWith("```"))
+                                text = text.Substring(0, text.Length - 3);
+                            text = text.Trim();
+                        }
+
+                        // Try to extract the first JSON array from the text
+                        int start = text.IndexOf('[');
+                        int end = text.LastIndexOf(']');
+                        if (start >= 0 && end > start)
+                        {
+                            string jsonArray = text.Substring(start, end - start + 1);
+                            try
+                            {
+                                var slides = JsonSerializer.Deserialize<List<LessonSlideDto>>(jsonArray, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                                return new SlideGenerationResultDto
+                                {
+                                    ErrorCode = "Success",
+                                    Slides = slides ?? new List<LessonSlideDto>(),
+                                    HttpStatusCode = 200
+                                };
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to parse slides JSON. Raw text: {Text}", text);
+                                return new SlideGenerationResultDto
+                                {
+                                    ErrorCode = "ParseException",
+                                    ErrorMessage = $"Failed to extract slide content: {ex.Message}",
+                                    HttpStatusCode = 502
+                                };
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogError("No JSON array found in Gemini response. Raw text: {Text}", text);
+                            return new SlideGenerationResultDto
+                            {
+                                ErrorCode = "ParseError",
+                                ErrorMessage = "No JSON array found in Gemini response.",
+                                HttpStatusCode = 502
+                            };
+                        }
                     }
                     else
                     {
