@@ -3,6 +3,7 @@ using EduVision.Services;
 using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 using EduVision.DBContext;
+using EduVision.Models.DTO;
 
 namespace EduVision.Controllers
 {
@@ -78,7 +79,7 @@ namespace EduVision.Controllers
         }
 
         [HttpPost("generate")]
-        public async Task<IActionResult> GenerateEducationLesson([FromBody] EducationRequest request)
+        public async Task<IActionResult> GenerateEducationLesson([FromBody] EducationRequestDto request)
         {
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
             {
@@ -247,7 +248,7 @@ namespace EduVision.Controllers
                 return StatusCode(500, new { error = "Failed to generate education lesson", details = ex.Message });
             }
         }
-        private async Task AssignAudioToSlidesAsync(List<LessonSlide> slides, string lessonId)
+        private async Task AssignAudioToSlidesAsync(List<LessonSlideDto> slides, string lessonId)
         {
             var audioTasks = slides.Select((slide, i) => Task.Run(async () =>
             {

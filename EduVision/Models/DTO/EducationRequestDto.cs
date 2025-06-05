@@ -1,8 +1,8 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace EduVision.Models
+namespace EduVision.Models.DTO
 {
-    public class EducationRequest
+    public class EducationRequestDto
     {
         [Required]
         public string Subject { get; set; } = string.Empty;

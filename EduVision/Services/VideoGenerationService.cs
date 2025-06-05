@@ -2,8 +2,8 @@ using Xabe.FFmpeg;
 using System.IO;
 using System.Net.Http;
 using System.Threading.Tasks;
-using EduVision.Models;
 using Microsoft.Extensions.Logging;
+using EduVision.Models.DTO;
 
 namespace EduVision.Services
 {
@@ -23,7 +23,7 @@ namespace EduVision.Services
             _httpClient = httpClient;
         }
 
-        public async Task<string> GenerateVideoAsync(List<LessonSlide> slides, string lessonId)
+        public async Task<string> GenerateVideoAsync(List<LessonSlideDto> slides, string lessonId)
         {
             if (slides == null || !slides.Any())
                 throw new ArgumentException("Slides cannot be null or empty", nameof(slides));

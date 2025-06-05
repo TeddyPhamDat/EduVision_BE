@@ -1,6 +1,6 @@
-﻿namespace EduVision.Models
+﻿namespace EduVision.Models.DTO
 {
-    public class LessonSlide
+    public class LessonSlideDto
     {
         public string? Title { get; set; }
         public string? Content { get; set; }

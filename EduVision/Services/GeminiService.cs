@@ -1,10 +1,10 @@
-﻿using EduVision.Models;
-using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text;
 using System.Text.Json;
 using EduVision.Models.Config;
+using EduVision.Models.DTO;
 
 namespace EduVision.Services
 {
@@ -27,12 +27,12 @@ namespace EduVision.Services
             _mongoDbService = mongoDbService;
         }
 
-        public async Task<SlideGenerationResult> GenerateEducationSlidesAsync(string subject, string chapter, int? grade = null)
+        public async Task<SlideGenerationResultDto> GenerateEducationSlidesAsync(string subject, string chapter, int? grade = null)
         {
             if (string.IsNullOrWhiteSpace(_apiKey))
             {
                 _logger.LogError("API key is missing.");
-                return new SlideGenerationResult
+                return new SlideGenerationResultDto
                 {
                     ErrorCode = "MissingApiKey",
                     ErrorMessage = "API key is missing.",
@@ -43,8 +43,13 @@ namespace EduVision.Services
             if (_mongoDbService == null)
             {
                 _logger.LogWarning("MongoDB service not available. Using standard prompt without context.");
+                return new SlideGenerationResultDto
+                {
+                    ErrorCode = "MongoDbServiceUnavailable",
+                    ErrorMessage = "MongoDB service is not available.",
+                    HttpStatusCode = 503 // Service Unavailable
+                };
             }
-
             try
             {
                 var content = await _mongoDbService.GetContentAsync(subject, chapter, grade);
@@ -93,7 +98,7 @@ namespace EduVision.Services
             {
                 _logger.LogError(ex, "Error generating slides with MongoDB content for {Subject}, {Chapter}, Grade {Grade}",
                     subject, chapter, grade);
-                return new SlideGenerationResult
+                return new SlideGenerationResultDto
                 {
                     ErrorCode = "Exception",
                     ErrorMessage = $"Error generating slides: {ex.Message}",
@@ -102,7 +107,7 @@ namespace EduVision.Services
             }
         }
 
-        private async Task<SlideGenerationResult> SendGeminiRequestAsync(string prompt)
+        private async Task<SlideGenerationResultDto> SendGeminiRequestAsync(string prompt)
         {
             var requestBody = new
             {
@@ -143,7 +148,7 @@ namespace EduVision.Services
                     if ((int)response.StatusCode == 401)
                     {
                         _logger.LogError("Unauthorized: Invalid API key.");
-                        return new SlideGenerationResult
+                        return new SlideGenerationResultDto
                         {
                             ErrorCode = "Unauthorized",
                             ErrorMessage = "Invalid API key.",
@@ -153,7 +158,7 @@ namespace EduVision.Services
                     if ((int)response.StatusCode == 403)
                     {
                         _logger.LogError("Forbidden: Access denied.");
-                        return new SlideGenerationResult
+                        return new SlideGenerationResultDto
                         {
                             ErrorCode = "Forbidden",
                             ErrorMessage = "Access denied.",
@@ -163,7 +168,7 @@ namespace EduVision.Services
                     if ((int)response.StatusCode == 429)
                     {
                         _logger.LogError("Too Many Requests: Rate limit exceeded.");
-                        return new SlideGenerationResult
+                        return new SlideGenerationResultDto
                         {
                             ErrorCode = "RateLimitExceeded",
                             ErrorMessage = "Rate limit exceeded.",
@@ -176,7 +181,7 @@ namespace EduVision.Services
                         if (retryCount > maxRetries)
                         {
                             _logger.LogError("Gemini API repeatedly unavailable (503) after {MaxRetries} retries.", maxRetries);
-                            return new SlideGenerationResult
+                            return new SlideGenerationResultDto
                             {
                                 ErrorCode = "ApiUnavailable",
                                 ErrorMessage = $"Gemini API unavailable (503) after {maxRetries} retries.",
@@ -191,7 +196,7 @@ namespace EduVision.Services
                     else
                     {
                         _logger.LogError("Gemini API failed: {StatusCode} - {ResponseBody}", response.StatusCode, responseBody);
-                        return new SlideGenerationResult
+                        return new SlideGenerationResultDto
                         {
                             ErrorCode = "ApiError",
                             ErrorMessage = $"Gemini API failed: {response.StatusCode} - {responseBody}",
@@ -202,7 +207,7 @@ namespace EduVision.Services
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Request failed.");
-                    return new SlideGenerationResult
+                    return new SlideGenerationResultDto
                     {
                         ErrorCode = "RequestException",
                         ErrorMessage = $"Request failed: {ex.Message}",
@@ -243,18 +248,18 @@ namespace EduVision.Services
 
                     if (!string.IsNullOrEmpty(text))
                     {
-                        var slides = JsonSerializer.Deserialize<List<LessonSlide>>(text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                        return new SlideGenerationResult
+                        var slides = JsonSerializer.Deserialize<List<LessonSlideDto>>(text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                        return new SlideGenerationResultDto
                         {
                             ErrorCode = "Success",
-                            Slides = slides ?? new List<LessonSlide>(),
+                            Slides = slides ?? new List<LessonSlideDto>(),
                             HttpStatusCode = 200
                         };
                     }
                     else
                     {
                         _logger.LogError("Extracted text is null or empty.");
-                        return new SlideGenerationResult
+                        return new SlideGenerationResultDto
                         {
                             ErrorCode = "ParseError",
                             ErrorMessage = "Extracted text is null or empty.",
@@ -265,7 +270,7 @@ namespace EduVision.Services
                 else
                 {
                     _logger.LogError("Unexpected Gemini response structure.");
-                    return new SlideGenerationResult
+                    return new SlideGenerationResultDto
                     {
                         ErrorCode = "ParseError",
                         ErrorMessage = "Unexpected Gemini response structure.",
@@ -276,7 +281,7 @@ namespace EduVision.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to extract slide content.");
-                return new SlideGenerationResult
+                return new SlideGenerationResultDto
                 {
                     ErrorCode = "ParseException",
                     ErrorMessage = $"Failed to extract slide content: {ex.Message}",

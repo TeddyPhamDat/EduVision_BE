@@ -1,17 +1,16 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace EduVision.Models
+namespace EduVision.Models.DTO
 {
-    public class ImageUploadRequest
+    public class ImageUploadRequestDto
     {
-        [Required]
-        public string Category { get; set; }
+        public required string Category { get; set; }
 
         public int? Grade { get; set; }
-        public string Chapter { get; set; }
-        public string Session { get; set; }
-        public string Class { get; set; }
-        public string Semester { get; set; }
+        public string? Chapter { get; set; }
+        public string? Session { get; set; }
+        public string? Class { get; set; }
+        public string? Semester { get; set; }
         public int? UserId { get; set; }
 
         public bool HasAllMetadata =>

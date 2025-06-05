@@ -1,7 +1,7 @@
-﻿using EduVision.Models;
-using System.Text;
+﻿using System.Text;
 using System.IO;
 using System.Threading.Tasks;
+using EduVision.Models.DTO;
 
 namespace EduVision.Services
 {
@@ -16,7 +16,7 @@ namespace EduVision.Services
             _blobStorage = blobStorage;
         }
 
-        public async Task<string> GenerateRevealHtmlAsync(List<LessonSlide> slides, string outputFilename, string templateName = "RevealTemplate.html")
+        public async Task<string> GenerateRevealHtmlAsync(List<LessonSlideDto> slides, string outputFilename, string templateName = "RevealTemplate.html")
         {
             var slideHtml = new StringBuilder();
 

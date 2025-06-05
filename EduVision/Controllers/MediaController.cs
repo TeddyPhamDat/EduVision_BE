@@ -3,6 +3,7 @@ using EduVision.DBContext;
 using EduVision.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using EduVision.Models.DTO;
 
 namespace EduVision.Controllers
 {
@@ -22,7 +23,7 @@ namespace EduVision.Controllers
         [HttpPost("upload-image")]
         public async Task<IActionResult> UploadImage(
     IFormFile file,
-    [FromForm] ImageUploadRequest request)
+    [FromForm] ImageUploadRequestDto request)
         {
             if (file == null)
                 return BadRequest("File is required.");

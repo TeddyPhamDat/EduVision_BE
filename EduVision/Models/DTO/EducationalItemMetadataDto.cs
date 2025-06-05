@@ -1,6 +1,6 @@
-namespace EduVision.Models
+namespace EduVision.Models.DTO
 {
-    public class EducationalItemMetadata
+    public class EducationalItemMetadataDto
     {
         public string Subject { get; set; } = string.Empty;
         public int Grade { get; set; }

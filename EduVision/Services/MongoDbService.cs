@@ -1,5 +1,5 @@
-using EduVision.Models;
 using EduVision.Models.Config;
+using EduVision.Models.DTO;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;
@@ -97,7 +97,7 @@ namespace EduVision.Services
         /// <summary>
         /// Gets metadata for an educational item by subject, chapter
         /// </summary>
-        public async Task<EducationalItemMetadata?> GetMetadataAsync(string subject, string chapter, int? grade = null)
+        public async Task<EducationalItemMetadataDto?> GetMetadataAsync(string subject, string chapter, int? grade = null)
         {
             try
             {
@@ -122,7 +122,7 @@ namespace EduVision.Services
                     return null;
                 }
 
-                var metadata = new EducationalItemMetadata
+                var metadata = new EducationalItemMetadataDto
                 {
                     Subject = document.Contains("subject") ? document["subject"].AsString : subject,
                     Grade = document.Contains("grade") ? document["grade"].AsInt32 : grade ?? 0,

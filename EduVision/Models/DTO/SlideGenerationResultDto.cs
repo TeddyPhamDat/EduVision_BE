@@ -1,10 +1,10 @@
-namespace EduVision.Models
+namespace EduVision.Models.DTO
 {
-    public class SlideGenerationResult
+    public class SlideGenerationResultDto
     {
         public string ErrorCode { get; set; } = "Success";
         public string? ErrorMessage { get; set; }
         public int HttpStatusCode { get; set; } = 200;
-        public List<LessonSlide> Slides { get; set; } = new();
+        public List<LessonSlideDto> Slides { get; set; } = new();
     }
 }
