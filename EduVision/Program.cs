@@ -10,9 +10,9 @@ using Xabe.FFmpeg;
 //FFmpeg.SetExecutablesPath(@"C:\tools\bin");
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Configuration
-    //.AddJsonFile("appsettings.Secrets.json", optional: true, reloadOnChange: true)
-    .AddJsonFile("Secrets/appsettings.Secrets.json", optional: true, reloadOnChange: true);
+//builder.Configuration
+//    //.AddJsonFile("appsettings.Secrets.json", optional: true, reloadOnChange: true)
+//    .AddJsonFile("Secrets/appsettings.Secrets.json", optional: true, reloadOnChange: true);
 
 // Configure FFmpeg path from configuration
 var ffmpegPath = builder.Configuration["FFmpeg:ExecutablesPath"];
@@ -57,6 +57,11 @@ builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+if (builder.Environment.IsDevelopment())
+{
+    builder.Configuration.AddJsonFile("Secrets/appsettings.Secrets.json", optional: true, reloadOnChange: true);
+}
 
 //------------------------------------------------------------// Add custom services
 // Register MongoDbConfig before MongoDbService
