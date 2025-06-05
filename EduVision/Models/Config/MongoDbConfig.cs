@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Collections.Generic;
 
-namespace EduVision.Models
+namespace EduVision.Models.Config
 {
     public class MongoDbConfig
     {

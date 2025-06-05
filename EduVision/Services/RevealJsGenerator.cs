@@ -85,7 +85,7 @@ namespace EduVision.Services
                 }
             }
 
-            var templatePath = Path.Combine(_env.ContentRootPath, "Testing", templateName);
+            var templatePath = Path.Combine(_env.ContentRootPath, "Template", templateName);
             var template = await File.ReadAllTextAsync(templatePath);
 
             var fullHtml = template.Replace("{{slides}}", slideHtml.ToString());

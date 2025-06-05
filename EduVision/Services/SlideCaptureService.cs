@@ -1,7 +1,7 @@
 using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
-using EduVision.Models;
+using EduVision.Models.Config;
 
 namespace EduVision.Services
 {

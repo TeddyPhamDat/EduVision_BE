@@ -1,4 +1,5 @@
 using EduVision.Models;
+using EduVision.Models.Config;
 using Microsoft.Extensions.Options;
 using MongoDB.Bson;
 using MongoDB.Driver;

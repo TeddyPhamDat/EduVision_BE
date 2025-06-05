@@ -1,4 +1,4 @@
-namespace EduVision.Models
+namespace EduVision.Models.Config
 {
     public class ScreenshotApiConfig
     {

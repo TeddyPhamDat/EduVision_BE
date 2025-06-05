@@ -1,6 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-namespace EduVision.Models
+namespace EduVision.Models.Config
 {
     public class GeminiConfig
     {

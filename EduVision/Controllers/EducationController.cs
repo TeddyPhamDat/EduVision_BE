@@ -91,10 +91,8 @@ namespace EduVision.Controllers
 
             try
             {
-                // Use category from request, fallback to "education" if not specified
                 string imageCategory = string.IsNullOrEmpty(request.ImageCategory) ? "education" : request.ImageCategory;
-                
-                // 1. Fetch images
+
                 var sw = Stopwatch.StartNew();
                 var imageUrls = await _imageService.GetImagesByCategoryAsync(imageCategory, 5);
                 sw.Stop();
@@ -105,27 +103,34 @@ namespace EduVision.Controllers
                     return BadRequest(new { error = $"Category '{imageCategory}' is not available or has no images" });
                 }
 
-                // 2. Generate slides using MongoDB content as context
                 sw.Restart();
-                var slides = await _geminiService.GenerateEducationSlidesAsync(request.Subject, request.Chapter, request.Grade);
+                var slideResult = await _geminiService.GenerateEducationSlidesAsync(request.Subject, request.Chapter, request.Grade);
+
+                if (slideResult == null || slideResult.HttpStatusCode != 200)
+                {
+                    return StatusCode(
+                        slideResult?.HttpStatusCode ?? 500,
+                        new { error = slideResult?.ErrorMessage ?? "Failed to generate slides", code = slideResult?.ErrorCode }
+                    );
+                }
+
+                var slides = slideResult.Slides;
+                if (slides == null || slides.Count == 0)
+                {
+                    return BadRequest(new { error = "No slides generated" });
+                }
                 sw.Stop();
                 _logger.LogInformation("Gemini slide generation with MongoDB context: {Elapsed} ms", sw.ElapsedMilliseconds);
 
-                if (slides == null || slides.Count == 0)
-                {
-                    return BadRequest(new { error = "Failed to generate slides" });
-                }
-
-                // 3. Generate unique ID for this lesson
                 var lessonId = Guid.NewGuid().ToString("N");
 
-                // 4. Assign images and generate audio for slides
-                sw.Restart();
-                await AssignAssetsToSlidesAsync(slides, imageUrls, lessonId);
-                sw.Stop();
-                _logger.LogInformation("Assign assets (image/audio): {Elapsed} ms", sw.ElapsedMilliseconds);
+                // Always assign images
+                for (int i = 0; i < slides.Count; i++)
+                {
+                    slides[i].ImageUrl = imageUrls[i % imageUrls.Count];
+                }
 
-                // 5. Generate HTML presentation
+                // Generate HTML presentation
                 string slideUrl;
                 try
                 {
@@ -147,7 +152,22 @@ namespace EduVision.Controllers
                     return StatusCode(500, new { error = "Failed to generate presentation", details = ex.Message });
                 }
 
-                // 6. Capture slide images
+                if (request.Mode == "slides")
+                {
+                    // Only slides requested, skip audio generation
+                    return Ok(new
+                    {
+                        Subject = request.Subject,
+                        Chapter = request.Chapter,
+                        Grade = request.Grade,
+                        SlideUrl = slideUrl
+                    });
+                }
+
+                // Only generate audio for video mode
+                await AssignAudioToSlidesAsync(slides, lessonId);
+
+                // Otherwise, generate video
                 sw.Restart();
                 var capturedImageUrls = await _slideCaptureService.CaptureSlidesAsync(slideUrl, slides.Count, lessonId);
                 sw.Stop();
@@ -158,32 +178,29 @@ namespace EduVision.Controllers
                     slides[i].CapturedImageUrl = capturedImageUrls[i];
                 }
 
-                // 7. Generate video
                 sw.Restart();
                 var videoUrl = await _videoGenerationService.GenerateVideoAsync(slides, lessonId);
                 sw.Stop();
                 _logger.LogInformation("Video generation: {Elapsed} ms", sw.ElapsedMilliseconds);
 
-                // 8. Save to database
+                // Save to database (optional, as before)
                 using var transaction = await _dbContext.Database.BeginTransactionAsync();
                 try
                 {
-                    // Save Prompt
                     var promptEntity = new Prompt
                     {
-                        UserId = 3, // Use "member" user
-                        Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade}",
+                        UserId = 3,
+                        Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {request.Mode}",
                         CreatedAt = DateTime.UtcNow,
                         Status = "Completed"
                     };
                     _dbContext.Prompts.Add(promptEntity);
                     await _dbContext.SaveChangesAsync();
 
-                    // Save Slides
                     var slideEntities = slides.Select((slide, i) => new Slide
                     {
                         PromptId = promptEntity.Promptid,
-                        UserId = 3, // Use "member" user
+                        UserId = 3,
                         Type = request.Subject,
                         Url = slide.CapturedImageUrl ?? slide.ImageUrl ?? "",
                         Status = "Completed"
@@ -192,7 +209,6 @@ namespace EduVision.Controllers
                     _dbContext.Slides.AddRange(slideEntities);
                     await _dbContext.SaveChangesAsync();
 
-                    // Save GeneratedVideo
                     var videoEntity = new GeneratedVideo
                     {
                         PromptId = promptEntity.Promptid,
@@ -222,7 +238,6 @@ namespace EduVision.Controllers
                     Chapter = request.Chapter,
                     Grade = request.Grade,
                     SlideUrl = slideUrl,
-                    Slides = slides,
                     VideoUrl = videoUrl
                 });
             }
@@ -232,16 +247,14 @@ namespace EduVision.Controllers
                 return StatusCode(500, new { error = "Failed to generate education lesson", details = ex.Message });
             }
         }
-
-        private async Task AssignAssetsToSlidesAsync(List<LessonSlide> slides, List<string> imageUrls, string lessonId)
+        private async Task AssignAudioToSlidesAsync(List<LessonSlide> slides, string lessonId)
         {
-            var assetTasks = slides.Select((slide, i) => Task.Run(async () =>
+            var audioTasks = slides.Select((slide, i) => Task.Run(async () =>
             {
-                slide.ImageUrl = imageUrls[i % imageUrls.Count];
                 var audioBlobName = $"presentations/{lessonId}/audio/{i}.wav";
                 slide.AudioUrl = await _ttsService.GenerateAudioAsync(slide.Content ?? string.Empty, audioBlobName);
             }));
-            await Task.WhenAll(assetTasks);
+            await Task.WhenAll(audioTasks);
         }
     }
 }

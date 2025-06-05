@@ -1,5 +1,5 @@
 using EduVision.DBContext;
-using EduVision.Models;
+using EduVision.Models.Config;
 using EduVision.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;

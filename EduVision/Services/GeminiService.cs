@@ -1,9 +1,10 @@
 ﻿using EduVision.Models;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Headers;
+using System.Net;
 using System.Text;
 using System.Text.Json;
+using EduVision.Models.Config;
 
 namespace EduVision.Services
 {
@@ -26,55 +27,26 @@ namespace EduVision.Services
             _mongoDbService = mongoDbService;
         }
 
-        public async Task<List<LessonSlide>> GenerateSlidesAsync(string prompt)
+        public async Task<SlideGenerationResult> GenerateEducationSlidesAsync(string subject, string chapter, int? grade = null)
         {
             if (string.IsNullOrWhiteSpace(_apiKey))
             {
                 _logger.LogError("API key is missing.");
-                return new List<LessonSlide>
+                return new SlideGenerationResult
                 {
-                    new LessonSlide { Title = "Error", Content = "API key is missing." }
-                };
-            }
-
-            var fullPrompt = $$"""
-            Create a JSON array of 5 slides. Each slide should have:
-            - "title": a short title of the slide
-            - "content": a 2-3 sentence explanation
-
-            Topic: {{prompt}}
-
-            Format:
-            [
-              { "title": "Slide 1", "content": "..." },
-              { "title": "Slide 2", "content": "..." },
-              ...
-            ]
-            """;
-
-            return await SendGeminiRequestAsync(fullPrompt);
-        }
-
-        public async Task<List<LessonSlide>> GenerateEducationSlidesAsync(string subject, string chapter, int? grade = null)
-        {
-            if (string.IsNullOrWhiteSpace(_apiKey))
-            {
-                _logger.LogError("API key is missing.");
-                return new List<LessonSlide>
-                {
-                    new LessonSlide { Title = "Error", Content = "API key is missing." }
+                    ErrorCode = "MissingApiKey",
+                    ErrorMessage = "API key is missing.",
+                    HttpStatusCode = 401 // Unauthorized
                 };
             }
 
             if (_mongoDbService == null)
             {
                 _logger.LogWarning("MongoDB service not available. Using standard prompt without context.");
-                return await GenerateSlidesAsync($"{subject} - {chapter}");
             }
 
             try
             {
-                // Get content from MongoDB based on subject, chapter, and grade
                 var content = await _mongoDbService.GetContentAsync(subject, chapter, grade);
                 var metadata = await _mongoDbService.GetMetadataAsync(subject, chapter, grade);
 
@@ -82,13 +54,11 @@ namespace EduVision.Services
                 {
                     _logger.LogWarning("No content found for {Subject}, {Chapter}, Grade {Grade}. Using standard prompt.",
                         subject, chapter, grade);
-                    return await GenerateSlidesAsync($"{subject} - {chapter}");
                 }
 
                 _logger.LogInformation("Found {Length} characters of content for {Subject}, {Chapter}, Grade {Grade}",
                     content.Length, subject, chapter, grade);
 
-                // Trim content if it's too long for the API
                 string trimmedContent = content;
                 if (content.Length > 8000)
                 {
@@ -96,7 +66,6 @@ namespace EduVision.Services
                     _logger.LogInformation("Content truncated from {OriginalLength} to 8000 characters", content.Length);
                 }
 
-                // Create a prompt that uses the educational content as context
                 string title = metadata?.Title ?? chapter;
                 string fullPrompt = $$"""
                 Create a JSON array of 5 educational slides about the Vietnamese subject "{{subject}}" chapter "{{title}}".
@@ -124,11 +93,16 @@ namespace EduVision.Services
             {
                 _logger.LogError(ex, "Error generating slides with MongoDB content for {Subject}, {Chapter}, Grade {Grade}",
                     subject, chapter, grade);
-                return await GenerateSlidesAsync($"{subject} - {chapter}");
+                return new SlideGenerationResult
+                {
+                    ErrorCode = "Exception",
+                    ErrorMessage = $"Error generating slides: {ex.Message}",
+                    HttpStatusCode = 500 // Internal Server Error
+                };
             }
         }
 
-        private async Task<List<LessonSlide>> SendGeminiRequestAsync(string prompt)
+        private async Task<SlideGenerationResult> SendGeminiRequestAsync(string prompt)
         {
             var requestBody = new
             {
@@ -163,42 +137,76 @@ namespace EduVision.Services
 
                     if (response.IsSuccessStatusCode)
                     {
-                        break; // Success, exit retry loop
+                        break;
                     }
 
-                    // Retry only on 503 (Service Unavailable)
+                    if ((int)response.StatusCode == 401)
+                    {
+                        _logger.LogError("Unauthorized: Invalid API key.");
+                        return new SlideGenerationResult
+                        {
+                            ErrorCode = "Unauthorized",
+                            ErrorMessage = "Invalid API key.",
+                            HttpStatusCode = 401
+                        };
+                    }
+                    if ((int)response.StatusCode == 403)
+                    {
+                        _logger.LogError("Forbidden: Access denied.");
+                        return new SlideGenerationResult
+                        {
+                            ErrorCode = "Forbidden",
+                            ErrorMessage = "Access denied.",
+                            HttpStatusCode = 403
+                        };
+                    }
+                    if ((int)response.StatusCode == 429)
+                    {
+                        _logger.LogError("Too Many Requests: Rate limit exceeded.");
+                        return new SlideGenerationResult
+                        {
+                            ErrorCode = "RateLimitExceeded",
+                            ErrorMessage = "Rate limit exceeded.",
+                            HttpStatusCode = 429
+                        };
+                    }
                     if ((int)response.StatusCode == 503)
                     {
                         retryCount++;
                         if (retryCount > maxRetries)
                         {
                             _logger.LogError("Gemini API repeatedly unavailable (503) after {MaxRetries} retries.", maxRetries);
-                            return new List<LessonSlide>
+                            return new SlideGenerationResult
                             {
-                                new LessonSlide { Title = "Error", Content = $"Gemini API unavailable (503) after {maxRetries} retries." }
+                                ErrorCode = "ApiUnavailable",
+                                ErrorMessage = $"Gemini API unavailable (503) after {maxRetries} retries.",
+                                HttpStatusCode = 503
                             };
                         }
                         _logger.LogWarning("Gemini API unavailable (503). Retrying {RetryCount}/{MaxRetries}...", retryCount, maxRetries);
                         await Task.Delay(delayMs);
-                        delayMs *= 2; // Exponential backoff
+                        delayMs *= 2;
                         continue;
                     }
                     else
                     {
-                        // For other errors, do not retry
                         _logger.LogError("Gemini API failed: {StatusCode} - {ResponseBody}", response.StatusCode, responseBody);
-                        return new List<LessonSlide>
+                        return new SlideGenerationResult
                         {
-                            new LessonSlide { Title = "Error", Content = $"Gemini API failed: {response.StatusCode} - {responseBody}" }
+                            ErrorCode = "ApiError",
+                            ErrorMessage = $"Gemini API failed: {response.StatusCode} - {responseBody}",
+                            HttpStatusCode = (int)response.StatusCode
                         };
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Request failed.");
-                    return new List<LessonSlide>
+                    return new SlideGenerationResult
                     {
-                        new LessonSlide { Title = "Error", Content = $"Request failed: {ex.Message}" }
+                        ErrorCode = "RequestException",
+                        ErrorMessage = $"Request failed: {ex.Message}",
+                        HttpStatusCode = 500
                     };
                 }
             }
@@ -215,7 +223,6 @@ namespace EduVision.Services
                 {
                     var text = textElement.GetString();
 
-                    // Remove Markdown code block markers if present
                     if (text != null)
                     {
                         text = text.Trim();
@@ -237,32 +244,43 @@ namespace EduVision.Services
                     if (!string.IsNullOrEmpty(text))
                     {
                         var slides = JsonSerializer.Deserialize<List<LessonSlide>>(text, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                        return slides ?? new List<LessonSlide>();
+                        return new SlideGenerationResult
+                        {
+                            ErrorCode = "Success",
+                            Slides = slides ?? new List<LessonSlide>(),
+                            HttpStatusCode = 200
+                        };
                     }
                     else
                     {
                         _logger.LogError("Extracted text is null or empty.");
-                        return new List<LessonSlide>
+                        return new SlideGenerationResult
                         {
-                            new LessonSlide { Title = "Parse Error", Content = "Extracted text is null or empty." }
+                            ErrorCode = "ParseError",
+                            ErrorMessage = "Extracted text is null or empty.",
+                            HttpStatusCode = 502 // Bad Gateway (invalid response from upstream)
                         };
                     }
                 }
                 else
                 {
                     _logger.LogError("Unexpected Gemini response structure.");
-                    return new List<LessonSlide>
+                    return new SlideGenerationResult
                     {
-                        new LessonSlide { Title = "Parse Error", Content = "Unexpected Gemini response structure." }
+                        ErrorCode = "ParseError",
+                        ErrorMessage = "Unexpected Gemini response structure.",
+                        HttpStatusCode = 502
                     };
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to extract slide content.");
-                return new List<LessonSlide>
+                return new SlideGenerationResult
                 {
-                    new LessonSlide { Title = "Parse Error", Content = $"Failed to extract slide content: {ex.Message}" }
+                    ErrorCode = "ParseException",
+                    ErrorMessage = $"Failed to extract slide content: {ex.Message}",
+                    HttpStatusCode = 502
                 };
             }
         }
