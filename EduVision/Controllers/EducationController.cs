@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 using EduVision.DBContext;
 using EduVision.Models.DTO;
+using Microsoft.EntityFrameworkCore;
 
 namespace EduVision.Controllers
 {
@@ -79,11 +80,19 @@ namespace EduVision.Controllers
         }
 
         [HttpPost("generate")]
-        public async Task<IActionResult> GenerateEducationLesson([FromBody] EducationRequestDto request)
+        [ProducesResponseType(typeof(SlideGenerationResultDto), 200)]
+        [ProducesResponseType(typeof(ErrorResponseDto), 400)]
+        [ProducesResponseType(typeof(ErrorResponseDto), 500)]
+        public async Task<ActionResult<SlideGenerationResultDto>> GenerateEducationLesson([FromBody] EducationRequestDto request)
         {
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
             {
-                return BadRequest(new { error = "Subject and chapter parameters are required" });
+                return BadRequest(new ErrorResponseDto
+                {
+                    ErrorCode = "MissingParameter",
+                    ErrorMessage = "Subject and chapter parameters are required",
+                    HttpStatusCode = 400
+                });
             }
 
             var totalSw = Stopwatch.StartNew();
@@ -95,43 +104,54 @@ namespace EduVision.Controllers
                 string imageCategory = string.IsNullOrEmpty(request.ImageCategory) ? "education" : request.ImageCategory;
 
                 var sw = Stopwatch.StartNew();
-                var imageUrls = await _imageService.GetImagesByCategoryAsync(imageCategory, 5);
-                sw.Stop();
-                _logger.LogInformation("Image fetch: {Elapsed} ms", sw.ElapsedMilliseconds);
-
-                if (imageUrls == null || imageUrls.Count == 0)
-                {
-                    return BadRequest(new { error = $"Category '{imageCategory}' is not available or has no images" });
-                }
-
-                sw.Restart();
                 var slideResult = await _geminiService.GenerateEducationSlidesAsync(request.Subject, request.Chapter, request.Grade);
 
                 if (slideResult == null || slideResult.HttpStatusCode != 200)
                 {
                     return StatusCode(
                         slideResult?.HttpStatusCode ?? 500,
-                        new { error = slideResult?.ErrorMessage ?? "Failed to generate slides", code = slideResult?.ErrorCode }
+                        new ErrorResponseDto
+                        {
+                            ErrorCode = slideResult?.ErrorCode ?? "SlideGenerationFailed",
+                            ErrorMessage = slideResult?.ErrorMessage ?? "Failed to generate slides",
+                            HttpStatusCode = slideResult?.HttpStatusCode ?? 500
+                        }
                     );
                 }
 
                 var slides = slideResult.Slides;
                 if (slides == null || slides.Count == 0)
                 {
-                    return BadRequest(new { error = "No slides generated" });
+                    return BadRequest(new ErrorResponseDto
+                    {
+                        ErrorCode = "NoSlides",
+                        ErrorMessage = "No slides generated",
+                        HttpStatusCode = 400
+                    });
                 }
+
+                var imageUrls = await GetBestImagesForSlidesAsync(imageCategory, request.Grade, request.Chapter, slides.Count);
+
+                if (imageUrls == null || imageUrls.All(string.IsNullOrEmpty))
+                {
+                    return BadRequest(new ErrorResponseDto
+                    {
+                        ErrorCode = "NoImages",
+                        ErrorMessage = $"No images found for category '{imageCategory}' (specific or default) during slide generation.",
+                        HttpStatusCode = 400
+                    });
+                }
+
+                for (int i = 0; i < slides.Count; i++)
+                {
+                    slides[i].ImageUrl = imageUrls[i];
+                }
+
                 sw.Stop();
-                _logger.LogInformation("Gemini slide generation with MongoDB context: {Elapsed} ms", sw.ElapsedMilliseconds);
+                _logger.LogInformation("Image fetch and assignment: {Elapsed} ms", sw.ElapsedMilliseconds);
 
                 var lessonId = Guid.NewGuid().ToString("N");
 
-                // Always assign images
-                for (int i = 0; i < slides.Count; i++)
-                {
-                    slides[i].ImageUrl = imageUrls[i % imageUrls.Count];
-                }
-
-                // Generate HTML presentation
                 string slideUrl;
                 try
                 {
@@ -150,25 +170,29 @@ namespace EduVision.Controllers
                 }
                 catch (Exception ex)
                 {
-                    return StatusCode(500, new { error = "Failed to generate presentation", details = ex.Message });
+                    return StatusCode(500, new ErrorResponseDto
+                    {
+                        ErrorCode = "PresentationGenerationFailed",
+                        ErrorMessage = "Failed to generate presentation",
+                        HttpStatusCode = 500,
+                        Details = ex.Message
+                    });
                 }
 
                 if (request.Mode == "slides")
                 {
-                    // Only slides requested, skip audio generation
-                    return Ok(new
+                    return Ok(new SlideGenerationResultDto
                     {
                         Subject = request.Subject,
                         Chapter = request.Chapter,
                         Grade = request.Grade,
-                        SlideUrl = slideUrl
+                        SlideUrl = slideUrl,
+                        Slides = slides,
                     });
                 }
 
-                // Only generate audio for video mode
                 await AssignAudioToSlidesAsync(slides, lessonId);
 
-                // Otherwise, generate video
                 sw.Restart();
                 var capturedImageUrls = await _slideCaptureService.CaptureSlidesAsync(slideUrl, slides.Count, lessonId);
                 sw.Stop();
@@ -184,7 +208,6 @@ namespace EduVision.Controllers
                 sw.Stop();
                 _logger.LogInformation("Video generation: {Elapsed} ms", sw.ElapsedMilliseconds);
 
-                // Save to database (optional, as before)
                 using var transaction = await _dbContext.Database.BeginTransactionAsync();
                 try
                 {
@@ -227,27 +250,41 @@ namespace EduVision.Controllers
                 {
                     await transaction.RollbackAsync();
                     _logger.LogError(ex, "Database error while saving lesson");
-                    return StatusCode(500, new { error = "Failed to save lesson data", details = ex.Message });
+                    return StatusCode(500, new ErrorResponseDto
+                    {
+                        ErrorCode = "DatabaseError",
+                        ErrorMessage = "Failed to save lesson data",
+                        HttpStatusCode = 500,
+                        Details = ex.Message
+                    });
                 }
 
                 totalSw.Stop();
                 _logger.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
 
-                return Ok(new
+                return Ok(new SlideGenerationResultDto
                 {
                     Subject = request.Subject,
                     Chapter = request.Chapter,
                     Grade = request.Grade,
                     SlideUrl = slideUrl,
-                    VideoUrl = videoUrl
+                    VideoUrl = videoUrl,
+                    Slides = slides,
                 });
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating education lesson");
-                return StatusCode(500, new { error = "Failed to generate education lesson", details = ex.Message });
+                return StatusCode(500, new ErrorResponseDto
+                {
+                    ErrorCode = "UnhandledException",
+                    ErrorMessage = "Failed to generate education lesson",
+                    HttpStatusCode = 500,
+                    Details = ex.Message
+                });
             }
         }
+
         private async Task AssignAudioToSlidesAsync(List<LessonSlideDto> slides, string lessonId)
         {
             var audioTasks = slides.Select((slide, i) => Task.Run(async () =>
@@ -256,6 +293,68 @@ namespace EduVision.Controllers
                 slide.AudioUrl = await _ttsService.GenerateAudioAsync(slide.Content ?? string.Empty, audioBlobName);
             }));
             await Task.WhenAll(audioTasks);
+        }
+
+        // Helper method to assign each specific image only once, then use defaults (randomized), with error handling
+        private async Task<List<string>?> GetBestImagesForSlidesAsync(
+            string category, int? grade, string chapter, int slideCount)
+        {
+            string gradeStr = grade.HasValue ? $"Grade{grade}" : "None";
+            string chapterStr = !string.IsNullOrWhiteSpace(chapter) ? chapter : "None";
+
+            // Fetch all relevant images in one query
+            var images = await _dbContext.Images
+                .Where(i => i.Category == category && i.Status == "Active" &&
+                    (
+                        (i.Grade == gradeStr && i.Chapter == chapterStr) // specific
+                        || (i.Grade == "None" && i.Chapter == "None")    // default
+                    ))
+                .ToListAsync();
+
+            var rng = new Random();
+            var specificImages = images
+                .Where(i => i.Grade == gradeStr && i.Chapter == chapterStr)
+                .Select(i => i.Url)
+                .OrderBy(_ => rng.Next())
+                .ToList();
+
+            var defaultImages = images
+                .Where(i => i.Grade == "None" && i.Chapter == "None")
+                .Select(i => i.Url)
+                .OrderBy(_ => rng.Next())
+                .ToList();
+
+            // If there are no images at all, return null to signal error
+            if (specificImages.Count == 0 && defaultImages.Count == 0)
+                return null;
+
+            var result = new List<string>();
+
+            // Assign each specific image only once, in random order
+            foreach (var url in specificImages)
+            {
+                if (result.Count < slideCount)
+                    result.Add(url);
+                else
+                    break;
+            }
+
+            // Fill the rest with default images (cycled, but shuffled)
+            int defaultIndex = 0;
+            while (result.Count < slideCount)
+            {
+                if (defaultImages.Count > 0)
+                {
+                    result.Add(defaultImages[defaultIndex % defaultImages.Count]);
+                    defaultIndex++;
+                }
+                else
+                {
+                    result.Add(string.Empty); // fallback if no images at all
+                }
+            }
+
+            return result;
         }
     }
 }

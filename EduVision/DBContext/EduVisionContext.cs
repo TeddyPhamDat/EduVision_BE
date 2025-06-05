@@ -88,24 +88,13 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.Chapter)
                 .HasMaxLength(100)
                 .HasColumnName("chapter");
-            entity.Property(e => e.Class)
+            entity.Property(e => e.Grade)
                 .HasMaxLength(50)
-                .HasColumnName("class");
-            entity.Property(e => e.Semester)
-                .HasMaxLength(50)
-                .HasColumnName("semester");
-            entity.Property(e => e.Session)
-                .HasMaxLength(50)
-                .HasColumnName("session");
+                .HasColumnName("grade");
             entity.Property(e => e.Status)
                 .HasMaxLength(50)
                 .HasColumnName("status");
             entity.Property(e => e.Url).HasColumnName("url");
-            entity.Property(e => e.UserId).HasColumnName("userID");
-
-            entity.HasOne(d => d.User).WithMany(p => p.Images)
-                .HasForeignKey(d => d.UserId)
-                .HasConstraintName("FK__Image__userID__59063A47");
         });
 
         modelBuilder.Entity<Payment>(entity =>

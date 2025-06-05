@@ -9,8 +9,6 @@ public partial class Image
 {
     public int ImageId { get; set; }
 
-    public int? UserId { get; set; }
-
     public string Url { get; set; }
 
     public string Status { get; set; }
@@ -19,11 +17,6 @@ public partial class Image
 
     public string Category { get; set; }
 
-    public string Semester { get; set; }
+    public string Grade { get; set; }
 
-    public string Session { get; set; }
-
-    public string Class { get; set; }
-
-    public virtual User User { get; set; }
 }

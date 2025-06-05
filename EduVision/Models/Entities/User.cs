@@ -21,8 +21,6 @@ public partial class User
 
     public int Role { get; set; }
 
-    public virtual ICollection<Image> Images { get; set; } = new List<Image>();
-
     public virtual ICollection<Payment> Payments { get; set; } = new List<Payment>();
 
     public virtual ICollection<Prompt> Prompts { get; set; } = new List<Prompt>();
