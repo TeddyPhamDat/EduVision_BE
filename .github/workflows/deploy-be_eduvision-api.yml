@@ -64,5 +64,5 @@ jobs:
         with:
           app-name: 'eduvision-api'
           slot-name: 'Production'
-          package: ${{env.DOTNET_ROOT}}/myapp
+          package: .
           
