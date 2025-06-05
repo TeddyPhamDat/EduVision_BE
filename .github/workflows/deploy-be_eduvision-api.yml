@@ -1,6 +1,3 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
 name: Build and deploy ASP.Net Core app to Azure Web App - eduvision-api
 
 on:
@@ -13,27 +10,31 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up .NET Core
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0'
 
-      - name: Build with dotnet
-        run: dotnet build --configuration Release
+      - name: Restore dependencies
+        run: dotnet restore EduVision/EduVision.csproj
 
-      - name: dotnet publish
-        run: dotnet publish -c Release -o ${{env.DOTNET_ROOT}}/myapp
+      - name: Build with dotnet
+        run: dotnet build EduVision/EduVision.csproj --configuration Release --no-restore
+
+      - name: Publish with dotnet
+        run: dotnet publish EduVision/EduVision.csproj --configuration Release --no-build --output ./published-app
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
-          name: .net-app
-          path: ${{env.DOTNET_ROOT}}/myapp
+          name: published-app
+          path: ./published-app
 
   deploy:
     runs-on: ubuntu-latest
@@ -42,15 +43,16 @@ jobs:
       name: 'Production'
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      id-token: write
+      contents: read
 
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
-          name: .net-app
-      
+          name: published-app
+          path: ./published-app
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -64,5 +66,4 @@ jobs:
         with:
           app-name: 'eduvision-api'
           slot-name: 'Production'
-          package: .
-          
+          package: ./published-app
