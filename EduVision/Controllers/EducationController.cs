@@ -179,18 +179,62 @@ namespace EduVision.Controllers
                     });
                 }
 
+                // Save to DB for "slides" mode
                 if (request.Mode == "slides")
                 {
-                    return Ok(new SlideGenerationResultDto
+                    using var transaction = await _dbContext.Database.BeginTransactionAsync();
+                    try
+                    {
+                        var promptEntity = new Prompt
+                        {
+                            UserId = 3,
+                            Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {request.Mode}",
+                            CreatedAt = DateTime.UtcNow,
+                            Status = "Completed"
+                        };
+                        _dbContext.Prompts.Add(promptEntity);
+                        await _dbContext.SaveChangesAsync();
+
+                        var slideEntities = slides.Select((slide, i) => new Slide
+                        {
+                            PromptId = promptEntity.Promptid,
+                            UserId = 3,
+                            Type = request.Subject,
+                            Url = slide.ImageUrl ?? "",
+                            Status = "Completed"
+                        }).ToList();
+
+                        _dbContext.Slides.AddRange(slideEntities);
+                        await _dbContext.SaveChangesAsync();
+
+                        await transaction.CommitAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        await transaction.RollbackAsync();
+                        _logger.LogError(ex, "Database error while saving slides lesson");
+                        return StatusCode(500, new ErrorResponseDto
+                        {
+                            ErrorCode = "DatabaseError",
+                            ErrorMessage = "Failed to save lesson data",
+                            HttpStatusCode = 500,
+                            Details = ex.Message
+                        });
+                    }
+
+                    totalSw.Stop();
+                    _logger.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
+
+                    return Ok(new
                     {
                         Subject = request.Subject,
                         Chapter = request.Chapter,
                         Grade = request.Grade,
-                        SlideUrl = slideUrl,
-                        Slides = slides,
+                        SlideUrl = slideUrl
                     });
                 }
 
+                // Continue for "video" mode
                 await AssignAudioToSlidesAsync(slides, lessonId);
 
                 sw.Restart();
@@ -208,68 +252,70 @@ namespace EduVision.Controllers
                 sw.Stop();
                 _logger.LogInformation("Video generation: {Elapsed} ms", sw.ElapsedMilliseconds);
 
-                using var transaction = await _dbContext.Database.BeginTransactionAsync();
-                try
+                // Save to DB for "video" mode
+                using (var transaction = await _dbContext.Database.BeginTransactionAsync())
                 {
-                    var promptEntity = new Prompt
+                    try
                     {
-                        UserId = 3,
-                        Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {request.Mode}",
-                        CreatedAt = DateTime.UtcNow,
-                        Status = "Completed"
-                    };
-                    _dbContext.Prompts.Add(promptEntity);
-                    await _dbContext.SaveChangesAsync();
+                        var promptEntity = new Prompt
+                        {
+                            UserId = 3,
+                            Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {request.Mode}",
+                            CreatedAt = DateTime.UtcNow,
+                            Status = "Completed"
+                        };
+                        _dbContext.Prompts.Add(promptEntity);
+                        await _dbContext.SaveChangesAsync();
 
-                    var slideEntities = slides.Select((slide, i) => new Slide
+                        var slideEntities = slides.Select((slide, i) => new Slide
+                        {
+                            PromptId = promptEntity.Promptid,
+                            UserId = 3,
+                            Type = request.Subject,
+                            Url = slide.CapturedImageUrl ?? slide.ImageUrl ?? "",
+                            Status = "Completed"
+                        }).ToList();
+
+                        _dbContext.Slides.AddRange(slideEntities);
+                        await _dbContext.SaveChangesAsync();
+
+                        var videoEntity = new GeneratedVideo
+                        {
+                            PromptId = promptEntity.Promptid,
+                            SlideId = slideEntities.FirstOrDefault()?.SlideId,
+                            Status = "Completed",
+                            CreatedAt = DateTime.UtcNow,
+                            VideoUrl = videoUrl
+                        };
+                        _dbContext.GeneratedVideos.Add(videoEntity);
+                        await _dbContext.SaveChangesAsync();
+
+                        await transaction.CommitAsync();
+                    }
+                    catch (Exception ex)
                     {
-                        PromptId = promptEntity.Promptid,
-                        UserId = 3,
-                        Type = request.Subject,
-                        Url = slide.CapturedImageUrl ?? slide.ImageUrl ?? "",
-                        Status = "Completed"
-                    }).ToList();
-
-                    _dbContext.Slides.AddRange(slideEntities);
-                    await _dbContext.SaveChangesAsync();
-
-                    var videoEntity = new GeneratedVideo
-                    {
-                        PromptId = promptEntity.Promptid,
-                        SlideId = slideEntities.FirstOrDefault()?.SlideId,
-                        Status = "Completed",
-                        CreatedAt = DateTime.UtcNow,
-                        VideoUrl = videoUrl
-                    };
-                    _dbContext.GeneratedVideos.Add(videoEntity);
-                    await _dbContext.SaveChangesAsync();
-
-                    await transaction.CommitAsync();
-                }
-                catch (Exception ex)
-                {
-                    await transaction.RollbackAsync();
-                    _logger.LogError(ex, "Database error while saving lesson");
-                    return StatusCode(500, new ErrorResponseDto
-                    {
-                        ErrorCode = "DatabaseError",
-                        ErrorMessage = "Failed to save lesson data",
-                        HttpStatusCode = 500,
-                        Details = ex.Message
-                    });
+                        await transaction.RollbackAsync();
+                        _logger.LogError(ex, "Database error while saving video lesson");
+                        return StatusCode(500, new ErrorResponseDto
+                        {
+                            ErrorCode = "DatabaseError",
+                            ErrorMessage = "Failed to save lesson data",
+                            HttpStatusCode = 500,
+                            Details = ex.Message
+                        });
+                    }
                 }
 
                 totalSw.Stop();
                 _logger.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
 
-                return Ok(new SlideGenerationResultDto
+                return Ok(new
                 {
                     Subject = request.Subject,
                     Chapter = request.Chapter,
                     Grade = request.Grade,
                     SlideUrl = slideUrl,
-                    VideoUrl = videoUrl,
-                    Slides = slides,
+                    VideoUrl = videoUrl
                 });
             }
             catch (Exception ex)
