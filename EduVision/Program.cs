@@ -1,10 +1,17 @@
 using EduVision.DBContext;
 using EduVision.Models.Config;
+using EduVision.Models.DTO.Response;
 using EduVision.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using System.Diagnostics;
+using System.Text;
 using Xabe.FFmpeg;
+
 
 ////FFmpeg.SetExecutablesPath("path/to/ffmpeg-folder");
 //FFmpeg.SetExecutablesPath(@"C:\tools\bin");
@@ -89,11 +96,15 @@ builder.Services.AddSingleton<GeminiService>(sp =>
 });
 
 builder.Services.AddHttpClient();
+builder.Services.AddScoped<JwtService>();
+builder.Services.AddTransient<IEmailSender, EmailSender>();
 builder.Services.AddSingleton<CloudinaryImageService>();
 builder.Services.AddSingleton<RevealJsGenerator>();
 builder.Services.AddSingleton<AzureBlobStorageService>();
 builder.Services.AddSingleton<SlideCaptureService>();
 builder.Services.AddSingleton<VideoGenerationService>();
+
+
 builder.Services.Configure<ScreenshotApiConfig>(
     builder.Configuration.GetSection("ScreenshotApi"));
 
@@ -102,6 +113,25 @@ builder.Services.AddDbContext<EduVisionContext>(options =>
 
 // Replace the existing TextToSpeechService registration
 builder.Services.AddSingleton<TextToSpeechService>();
+
+// Add authentication
+builder.Services.AddAuthentication("Bearer")
+    .AddJwtBearer("Bearer", options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
+        };
+    });
+
+builder.Services.AddAuthorization();
+
 
 var app = builder.Build();
 
@@ -120,7 +150,9 @@ app.UseExceptionHandler(errorApp =>
 });
 
 app.UseHttpsRedirection();
+app.UseMiddleware<ExceptionMiddleware>();
 
+app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

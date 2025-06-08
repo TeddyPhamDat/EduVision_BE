@@ -5,6 +5,8 @@ using System.Diagnostics;
 using EduVision.DBContext;
 using EduVision.Models.DTO;
 using Microsoft.EntityFrameworkCore;
+using EduVision.Models.DTO.Request;
+using EduVision.Models.DTO.Response;
 
 namespace EduVision.Controllers
 {

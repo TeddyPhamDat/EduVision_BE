@@ -18,5 +18,4 @@ public partial class Image
     public string Category { get; set; }
 
     public string Grade { get; set; }
-
 }

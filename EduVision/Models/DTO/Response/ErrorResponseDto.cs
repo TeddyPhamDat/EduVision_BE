@@ -1,4 +1,4 @@
-namespace EduVision.Models.DTO
+namespace EduVision.Models.DTO.Response
 {
     public class ErrorResponseDto
     {

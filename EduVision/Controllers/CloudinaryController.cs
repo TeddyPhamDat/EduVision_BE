@@ -3,7 +3,7 @@ using EduVision.DBContext;
 using EduVision.Models;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using EduVision.Models.DTO;
+using EduVision.Models.DTO.Request;
 
 namespace EduVision.Controllers
 {

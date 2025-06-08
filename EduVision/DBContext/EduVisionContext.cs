@@ -22,6 +22,8 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<Image> Images { get; set; }
 
+    public virtual DbSet<OtpToken> OtpTokens { get; set; }
+
     public virtual DbSet<Payment> Payments { get; set; }
 
     public virtual DbSet<Prompt> Prompts { get; set; }
@@ -32,25 +34,15 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
-    //public static string GetConnectionString(string connectionStringName)
-    //{
-    //    var config = new ConfigurationBuilder()
-    //        .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
-    //        .AddJsonFile("Secrets/appsettings.Secrets.json")
-    //        .Build();
-
-    //    string connectionString = config.GetConnectionString(connectionStringName);
-    //    return connectionString;
-    //}
-
-    //protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
-    //    => optionsBuilder.UseSqlServer(GetConnectionString("DefaultConnection")).UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
+        => optionsBuilder.UseSqlServer("Data Source=TEDDY\\TEDDY;Initial Catalog=EduVision;User ID=sa;Password=12345;Encrypt=False");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<GeneratedVideo>(entity =>
         {
-            entity.HasKey(e => e.GenerateVideoId).HasName("PK__Generate__FA76872526CFFC99");
+            entity.HasKey(e => e.GenerateVideoId).HasName("PK__Generate__FA768725FC540956");
 
             entity.ToTable("GeneratedVideo");
 
@@ -58,7 +50,11 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.CreatedAt)
                 .HasColumnType("datetime")
                 .HasColumnName("created_at");
+            entity.Property(e => e.DurationSec).HasColumnName("duration_sec");
             entity.Property(e => e.PromptId).HasColumnName("prompt_id");
+            entity.Property(e => e.Resolution)
+                .HasMaxLength(50)
+                .HasColumnName("resolution");
             entity.Property(e => e.SlideId).HasColumnName("slide_id");
             entity.Property(e => e.Status)
                 .HasMaxLength(50)
@@ -67,16 +63,16 @@ public partial class EduVisionContext : DbContext
 
             entity.HasOne(d => d.Prompt).WithMany(p => p.GeneratedVideos)
                 .HasForeignKey(d => d.PromptId)
-                .HasConstraintName("FK__Generated__promp__5BE2A6F2");
+                .HasConstraintName("FK__Generated__promp__4CA06362");
 
             entity.HasOne(d => d.Slide).WithMany(p => p.GeneratedVideos)
                 .HasForeignKey(d => d.SlideId)
-                .HasConstraintName("FK__Generated__slide__5CD6CB2B");
+                .HasConstraintName("FK__Generated__slide__4D94879B");
         });
 
         modelBuilder.Entity<Image>(entity =>
         {
-            entity.HasKey(e => e.ImageId).HasName("PK__Image__336E9B757393C6E3");
+            entity.HasKey(e => e.ImageId).HasName("PK__Image__336E9B75117BB533");
 
             entity.ToTable("Image");
 
@@ -96,9 +92,31 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.Url).HasColumnName("url");
         });
 
+        modelBuilder.Entity<OtpToken>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PK__OtpToken__3213E83FE1E8CAF9");
+
+            entity.ToTable("OtpToken");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Email)
+                .HasMaxLength(255)
+                .HasColumnName("email");
+            entity.Property(e => e.Token)
+                .HasMaxLength(255)
+                .HasColumnName("token");
+            entity.Property(e => e.Used)
+                .HasDefaultValue(false)
+                .HasColumnName("used");
+        });
+
         modelBuilder.Entity<Payment>(entity =>
         {
-            entity.HasKey(e => e.PaymentId).HasName("PK__Payment__A0D9EFA6BB17A0A6");
+            entity.HasKey(e => e.PaymentId).HasName("PK__Payment__A0D9EFA616787F53");
 
             entity.ToTable("Payment");
 
@@ -116,12 +134,12 @@ public partial class EduVisionContext : DbContext
 
             entity.HasOne(d => d.User).WithMany(p => p.Payments)
                 .HasForeignKey(d => d.UserId)
-                .HasConstraintName("FK__Payment__user_id__4CA06362");
+                .HasConstraintName("FK__Payment__user_id__3E52440B");
         });
 
         modelBuilder.Entity<Prompt>(entity =>
         {
-            entity.HasKey(e => e.Promptid).HasName("PK__Prompt__A1B260C89B284CD6");
+            entity.HasKey(e => e.Promptid).HasName("PK__Prompt__A1B260C8B4C1156D");
 
             entity.ToTable("Prompt");
 
@@ -137,12 +155,12 @@ public partial class EduVisionContext : DbContext
 
             entity.HasOne(d => d.User).WithMany(p => p.Prompts)
                 .HasForeignKey(d => d.UserId)
-                .HasConstraintName("FK__Prompt__user_id__52593CB8");
+                .HasConstraintName("FK__Prompt__user_id__440B1D61");
         });
 
         modelBuilder.Entity<Quotum>(entity =>
         {
-            entity.HasKey(e => e.QuotaId).HasName("PK__Quota__DC48C722C0DA1854");
+            entity.HasKey(e => e.QuotaId).HasName("PK__Quota__DC48C722FCB8CD1E");
 
             entity.Property(e => e.QuotaId).HasColumnName("quotaID");
             entity.Property(e => e.DailyLimit).HasColumnName("daily_limit");
@@ -155,12 +173,12 @@ public partial class EduVisionContext : DbContext
 
             entity.HasOne(d => d.User).WithMany(p => p.Quota)
                 .HasForeignKey(d => d.UserId)
-                .HasConstraintName("FK__Quota__user_id__4F7CD00D");
+                .HasConstraintName("FK__Quota__user_id__412EB0B6");
         });
 
         modelBuilder.Entity<Slide>(entity =>
         {
-            entity.HasKey(e => e.SlideId).HasName("PK__Slide__39AF7A8E743C398C");
+            entity.HasKey(e => e.SlideId).HasName("PK__Slide__39AF7A8E54CACD00");
 
             entity.ToTable("Slide");
 
@@ -177,16 +195,16 @@ public partial class EduVisionContext : DbContext
 
             entity.HasOne(d => d.Prompt).WithMany(p => p.Slides)
                 .HasForeignKey(d => d.PromptId)
-                .HasConstraintName("FK__Slide__prompt_id__5535A963");
+                .HasConstraintName("FK__Slide__prompt_id__46E78A0C");
 
             entity.HasOne(d => d.User).WithMany(p => p.Slides)
                 .HasForeignKey(d => d.UserId)
-                .HasConstraintName("FK__Slide__userID__5629CD9C");
+                .HasConstraintName("FK__Slide__userID__47DBAE45");
         });
 
         modelBuilder.Entity<User>(entity =>
         {
-            entity.HasKey(e => e.UserId).HasName("PK__User__CB9A1CDF7FA65E0E");
+            entity.HasKey(e => e.UserId).HasName("PK__User__CB9A1CDF0FC77C0D");
 
             entity.ToTable("User");
 
@@ -197,7 +215,11 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.Email)
                 .HasMaxLength(255)
                 .HasColumnName("email");
+            entity.Property(e => e.FullName)
+                .HasMaxLength(255)
+                .HasColumnName("fullName");
             entity.Property(e => e.IsActive).HasColumnName("is_active");
+            entity.Property(e => e.IsVerified).HasColumnName("is_verified");
             entity.Property(e => e.Password)
                 .HasMaxLength(255)
                 .HasColumnName("password");

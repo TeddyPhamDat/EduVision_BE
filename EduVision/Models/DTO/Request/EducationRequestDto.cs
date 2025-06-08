@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace EduVision.Models.DTO
+namespace EduVision.Models.DTO.Request
 {
     public class EducationRequestDto
     {
