@@ -186,16 +186,16 @@ namespace EduVision.Controllers
                         _dbContext.Prompts.Add(promptEntity);
                         await _dbContext.SaveChangesAsync();
 
-                        var slideEntities = slides.Select((slide, i) => new Slide
+                        var slideEntity = new Slide
                         {
                             PromptId = promptEntity.Promptid,
                             UserId = userId,
                             Type = request.Subject,
-                            Url = slide.ImageUrl ?? "",
+                            Url = slideUrl ?? "",
                             Status = "Completed"
-                        }).ToList();
+                        };
 
-                        _dbContext.Slides.AddRange(slideEntities);
+                        _dbContext.Slides.Add(slideEntity);
                         await _dbContext.SaveChangesAsync();
 
                         await transaction.CommitAsync();
@@ -218,7 +218,6 @@ namespace EduVision.Controllers
                         Grade = request.Grade,
                         SlideUrl = slideUrl
                     }));
-
                 }
 
                 // Continue for "video" mode
