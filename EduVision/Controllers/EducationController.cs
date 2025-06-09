@@ -1,12 +1,14 @@
-using EduVision.Models;
-using EduVision.Services;
-using Microsoft.AspNetCore.Mvc;
-using System.Diagnostics;
 using EduVision.DBContext;
+using EduVision.Models;
 using EduVision.Models.DTO;
-using Microsoft.EntityFrameworkCore;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
+using EduVision.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Diagnostics;
+using System.Security.Claims;
 
 namespace EduVision.Controllers
 {
@@ -52,49 +54,52 @@ namespace EduVision.Controllers
             try
             {
                 var subjects = await _mongoDbService.GetAvailableSubjectsAsync();
-                return Ok(subjects);
+                return Ok(ApiResponse<List<string>>.Success(subjects));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching subjects");
-                return StatusCode(500, new { error = "Failed to fetch subjects", details = ex.Message });
+                return StatusCode(500, ApiResponse<string>.Fail($"Failed to fetch subjects: {ex.Message}", 500));
             }
         }
+
 
         [HttpGet("chapters")]
         public async Task<IActionResult> GetChapters([FromQuery] string subject, [FromQuery] int? grade = null)
         {
             if (string.IsNullOrEmpty(subject))
             {
-                return BadRequest(new { error = "Subject parameter is required" });
+                return BadRequest(ApiResponse<string>.Fail("Subject parameter is required", 400));
             }
 
             try
             {
                 var chapters = await _mongoDbService.GetChaptersAsync(subject, grade);
-                return Ok(chapters);
+                return Ok(ApiResponse<List<string>>.Success(chapters));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching chapters for subject: {Subject}", subject);
-                return StatusCode(500, new { error = "Failed to fetch chapters", details = ex.Message });
+                return StatusCode(500, ApiResponse<string>.Fail($"Failed to fetch chapters: {ex.Message}", 500));
             }
         }
 
+
+        [Authorize(Roles = "USER")]
         [HttpPost("generate")]
         [ProducesResponseType(typeof(SlideGenerationResultDto), 200)]
-        [ProducesResponseType(typeof(ErrorResponseDto), 400)]
-        [ProducesResponseType(typeof(ErrorResponseDto), 500)]
         public async Task<ActionResult<SlideGenerationResultDto>> GenerateEducationLesson([FromBody] EducationRequestDto request)
         {
+            var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
+            {
+                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+
+            }
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
             {
-                return BadRequest(new ErrorResponseDto
-                {
-                    ErrorCode = "MissingParameter",
-                    ErrorMessage = "Subject and chapter parameters are required",
-                    HttpStatusCode = 400
-                });
+                return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
+
             }
 
             var totalSw = Stopwatch.StartNew();
@@ -111,37 +116,26 @@ namespace EduVision.Controllers
                 if (slideResult == null || slideResult.HttpStatusCode != 200)
                 {
                     return StatusCode(
-                        slideResult?.HttpStatusCode ?? 500,
-                        new ErrorResponseDto
-                        {
-                            ErrorCode = slideResult?.ErrorCode ?? "SlideGenerationFailed",
-                            ErrorMessage = slideResult?.ErrorMessage ?? "Failed to generate slides",
-                            HttpStatusCode = slideResult?.HttpStatusCode ?? 500
-                        }
+                     slideResult?.HttpStatusCode ?? 500,
+                     ApiResponse<string>.Fail(slideResult?.ErrorMessage ?? "Failed to generate slides", slideResult?.HttpStatusCode ?? 500)
                     );
+
+                   
                 }
 
                 var slides = slideResult.Slides;
                 if (slides == null || slides.Count == 0)
                 {
-                    return BadRequest(new ErrorResponseDto
-                    {
-                        ErrorCode = "NoSlides",
-                        ErrorMessage = "No slides generated",
-                        HttpStatusCode = 400
-                    });
+                    return BadRequest(ApiResponse<string>.Fail("No slides generated", 400));
+
                 }
 
                 var imageUrls = await GetBestImagesForSlidesAsync(imageCategory, request.Grade, request.Chapter, slides.Count);
 
                 if (imageUrls == null || imageUrls.All(string.IsNullOrEmpty))
                 {
-                    return BadRequest(new ErrorResponseDto
-                    {
-                        ErrorCode = "NoImages",
-                        ErrorMessage = $"No images found for category '{imageCategory}' (specific or default) during slide generation.",
-                        HttpStatusCode = 400
-                    });
+                    return BadRequest(ApiResponse<string>.Fail($"No images found for category '{imageCategory}'", 400));
+
                 }
 
                 for (int i = 0; i < slides.Count; i++)
@@ -172,13 +166,8 @@ namespace EduVision.Controllers
                 }
                 catch (Exception ex)
                 {
-                    return StatusCode(500, new ErrorResponseDto
-                    {
-                        ErrorCode = "PresentationGenerationFailed",
-                        ErrorMessage = "Failed to generate presentation",
-                        HttpStatusCode = 500,
-                        Details = ex.Message
-                    });
+                    return StatusCode(500, ApiResponse<string>.Fail("Failed to generate presentation: " + ex.Message, 500));
+
                 }
 
                 // Save to DB for "slides" mode
@@ -189,7 +178,7 @@ namespace EduVision.Controllers
                     {
                         var promptEntity = new Prompt
                         {
-                            UserId = 3,
+                            UserId = userId,
                             Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {request.Mode}",
                             CreatedAt = DateTime.UtcNow,
                             Status = "Completed"
@@ -200,7 +189,7 @@ namespace EduVision.Controllers
                         var slideEntities = slides.Select((slide, i) => new Slide
                         {
                             PromptId = promptEntity.Promptid,
-                            UserId = 3,
+                            UserId = userId,
                             Type = request.Subject,
                             Url = slide.ImageUrl ?? "",
                             Status = "Completed"
@@ -215,25 +204,21 @@ namespace EduVision.Controllers
                     {
                         await transaction.RollbackAsync();
                         _logger.LogError(ex, "Database error while saving slides lesson");
-                        return StatusCode(500, new ErrorResponseDto
-                        {
-                            ErrorCode = "DatabaseError",
-                            ErrorMessage = "Failed to save lesson data",
-                            HttpStatusCode = 500,
-                            Details = ex.Message
-                        });
+                        return StatusCode(500, ApiResponse<string>.Fail("Failed to save lesson data: " + ex.Message, 500));
+
                     }
 
                     totalSw.Stop();
                     _logger.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
 
-                    return Ok(new
+                    return Ok(ApiResponse<object>.Success(new
                     {
                         Subject = request.Subject,
                         Chapter = request.Chapter,
                         Grade = request.Grade,
                         SlideUrl = slideUrl
-                    });
+                    }));
+
                 }
 
                 // Continue for "video" mode
@@ -261,7 +246,7 @@ namespace EduVision.Controllers
                     {
                         var promptEntity = new Prompt
                         {
-                            UserId = 3,
+                            UserId = userId,
                             Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {request.Mode}",
                             CreatedAt = DateTime.UtcNow,
                             Status = "Completed"
@@ -272,7 +257,7 @@ namespace EduVision.Controllers
                         var slideEntities = slides.Select((slide, i) => new Slide
                         {
                             PromptId = promptEntity.Promptid,
-                            UserId = 3,
+                            UserId = userId,
                             Type = request.Subject,
                             Url = slide.CapturedImageUrl ?? slide.ImageUrl ?? "",
                             Status = "Completed"
@@ -298,38 +283,29 @@ namespace EduVision.Controllers
                     {
                         await transaction.RollbackAsync();
                         _logger.LogError(ex, "Database error while saving video lesson");
-                        return StatusCode(500, new ErrorResponseDto
-                        {
-                            ErrorCode = "DatabaseError",
-                            ErrorMessage = "Failed to save lesson data",
-                            HttpStatusCode = 500,
-                            Details = ex.Message
-                        });
+                        return StatusCode(500, ApiResponse<string>.Fail("Failed to save lesson data: " + ex.Message, 500));
+
                     }
                 }
 
                 totalSw.Stop();
                 _logger.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
 
-                return Ok(new
+                return Ok(ApiResponse<object>.Success(new
                 {
                     Subject = request.Subject,
                     Chapter = request.Chapter,
                     Grade = request.Grade,
                     SlideUrl = slideUrl,
                     VideoUrl = videoUrl
-                });
+                }));
+
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error generating education lesson");
-                return StatusCode(500, new ErrorResponseDto
-                {
-                    ErrorCode = "UnhandledException",
-                    ErrorMessage = "Failed to generate education lesson",
-                    HttpStatusCode = 500,
-                    Details = ex.Message
-                });
+                return StatusCode(500, ApiResponse<string>.Fail("Failed to generate education lesson: " + ex.Message, 500));
+
             }
         }
 

@@ -4,11 +4,12 @@ using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
 using EduVision.Models.Entities.Enum;
 using EduVision.Services;
-
+using Google.Apis.Auth;
 using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.SqlServer.Server;
 using Newtonsoft.Json.Linq;
 using System;
 using LoginRequest = EduVision.Models.DTO.Request.LoginRequest;
@@ -66,7 +67,7 @@ public class AuthController : ControllerBase
             if ((bool)existingUser.IsVerified)
                 return BadRequest(ApiResponse<string>.Fail("Email has been registered", 400));
 
-            // Tìm OTP ch?a s? d?ng và t?o cách ?ây d??i 1 phút
+            
             var oldOtp = await _context.OtpTokens
                 .Where(o => o.Email == request.Email && o.Used == false)
                 .OrderByDescending(o => o.CreatedAt)
@@ -77,7 +78,7 @@ public class AuthController : ControllerBase
                 return Ok(ApiResponse<string>.Success("", "OTP has been sent. Please check your email."));
             }
 
-            // T?o OTP m?i n?u ?ã h?t h?n ho?c không có
+            
             var newOtp = new OtpToken
             {
                 Email = request.Email,
@@ -93,7 +94,7 @@ public class AuthController : ControllerBase
             return Ok(ApiResponse<string>.Success("", "New OTP has been sent again"));
         }
 
-        // N?u user ch?a t?n t?i ? thêm m?i
+        
         var newUser = new User
         {
             Email = request.Email,
@@ -149,10 +150,10 @@ public class AuthController : ControllerBase
         if (user.IsVerified == true)
             return BadRequest(ApiResponse<string>.Fail("Account already verified", 400));
 
-        // ?ánh d?u OTP ?ã dùng
+      
         otp.Used = true;
 
-        // C?p nh?t thông tin user
+        
         user.IsVerified = true;
         user.FullName = request.FullName;
         user.Password = BCrypt.Net.BCrypt.HashPassword(request.Password);
@@ -173,6 +174,58 @@ public class AuthController : ControllerBase
 
         return Ok(ApiResponse<LoginResponse>.Success(response, "Registration completed successfully"));
     }
+
+    [HttpPost("google-login")]
+    public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest request)
+    {
+        GoogleJsonWebSignature.Payload payload;
+        try
+        {
+            payload = await GoogleJsonWebSignature.ValidateAsync(request.IdToken);
+        }
+        catch (InvalidJwtException)
+        {
+            return BadRequest(ApiResponse<string>.Fail("Invalid Token ID", 401));
+        }
+
+        var email = payload.Email;
+        if (string.IsNullOrEmpty(email))
+            return BadRequest(ApiResponse<string>.Fail("Can't get email from Google", 400));
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+        if (user != null)
+        {
+          
+            if (user.IsVerified == false)
+            {
+                return BadRequest(ApiResponse<string>.Fail("The account has not been authenticated via OTP", 400));
+            }
+
+            
+        }
+        else
+        {
+            
+            user = new User
+            {
+                Email = email,
+                UserName = payload.Email,
+                FullName = payload.Name,
+                Role = (int)Role.USER,
+                IsVerified = true,
+                CreatedAt = DateTime.UtcNow,
+                IsActive = true
+            };
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
+        }
+
+        var token = _jwtService.GenerateToken(user);
+
+        return Ok(ApiResponse<string>.Success(token, "Sign in successfully with Google"));
+    }
+
 
 
     private string GenerateOtpToken()

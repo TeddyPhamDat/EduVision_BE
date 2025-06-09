@@ -1,12 +1,14 @@
-using EduVision.Services;
 using EduVision.DBContext;
 using EduVision.Models;
+using EduVision.Models.DTO.Request;
+using EduVision.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using EduVision.Models.DTO.Request;
 
 namespace EduVision.Controllers
 {
+    [Authorize(Roles = "MANAGER")]
     [ApiController]
     [Route("api/[controller]")]
     public class CloudinaryController : ControllerBase

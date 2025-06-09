@@ -132,6 +132,16 @@ builder.Services.AddAuthentication("Bearer")
 
 builder.Services.AddAuthorization();
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend",
+        builder => builder
+            .WithOrigins("http://127.0.0.1:5500", "http://localhost:5500")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials()); // n?u c?n g?i cookie/token
+});
+
 
 var app = builder.Build();
 
@@ -152,6 +162,7 @@ app.UseExceptionHandler(errorApp =>
 app.UseHttpsRedirection();
 app.UseMiddleware<ExceptionMiddleware>();
 
+app.UseCors("AllowFrontend");
 app.UseAuthentication();
 app.UseAuthorization();
 
