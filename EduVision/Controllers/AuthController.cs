@@ -78,7 +78,7 @@ public class AuthController : ControllerBase
                 return Ok(ApiResponse<string>.Success("", "OTP has been sent. Please check your email."));
             }
 
-            
+            //lmao
             var newOtp = new OtpToken
             {
                 Email = request.Email,
