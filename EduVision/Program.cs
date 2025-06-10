@@ -164,12 +164,11 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowFrontend",
+    options.AddPolicy("AllowAll",
         builder => builder
-            .WithOrigins("http://127.0.0.1:5500", "http://localhost:5500")
+            .AllowAnyOrigin()
             .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials()); // n?u c?n g?i cookie/token
+            .AllowAnyMethod());
 });
 
 
