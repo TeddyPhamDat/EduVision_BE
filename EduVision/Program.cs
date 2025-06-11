@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using Net.payOS;
 using System.Diagnostics;
 using System.Text;
 using Xabe.FFmpeg;
@@ -99,6 +100,15 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddTransient<IEmailSender, EmailSender>();
 builder.Services.AddSingleton<CloudinaryImageService>();
+builder.Services.AddScoped<IQuotaService,QuotaService>();
+//builder.Services.AddHttpClient<PayOSClient>();
+var configuration = builder.Configuration;
+var clientId = configuration["PayOS:ClientId"];
+var apiKey = configuration["PayOS:ApiKey"];
+var checksumKey = configuration["PayOS:ChecksumKey"];
+
+builder.Services.AddSingleton(new PayOS(clientId, apiKey, checksumKey));
+
 builder.Services.AddSingleton<RevealJsGenerator>();
 builder.Services.AddSingleton<AzureBlobStorageService>();
 builder.Services.AddSingleton<SlideCaptureService>();

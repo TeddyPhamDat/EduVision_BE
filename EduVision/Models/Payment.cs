@@ -17,5 +17,9 @@ public partial class Payment
 
     public DateTime? CreatedAt { get; set; }
 
+    public string OrderCode { get; set; }
+
     public virtual User User { get; set; }
+
+
 }

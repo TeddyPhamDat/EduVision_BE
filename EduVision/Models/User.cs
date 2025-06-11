@@ -29,7 +29,7 @@ public partial class User
 
     public virtual ICollection<Prompt> Prompts { get; set; } = new List<Prompt>();
 
-    public virtual ICollection<Quotum> Quota { get; set; } = new List<Quotum>();
-
     public virtual ICollection<Slide> Slides { get; set; } = new List<Slide>();
+
+    public virtual ICollection<UserQuotum> UserQuota { get; set; } = new List<UserQuotum>();
 }
