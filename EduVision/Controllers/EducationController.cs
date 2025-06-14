@@ -3,6 +3,7 @@ using EduVision.Models;
 using EduVision.Models.DTO;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
+using EduVision.Models.Entities.Enum;
 using EduVision.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,7 @@ namespace EduVision.Controllers
         private readonly MongoDbService _mongoDbService;
         private readonly EduVisionContext _dbContext;
         private readonly ILogger<EducationController> _logger;
+        private readonly IQuotaService _quotaService;
 
         public EducationController(
             GeminiService geminiService,
@@ -35,7 +37,8 @@ namespace EduVision.Controllers
             VideoGenerationService videoGenerationService,
             MongoDbService mongoDbService,
             EduVisionContext dbContext,
-            ILogger<EducationController> logger)
+            ILogger<EducationController> logger,
+            IQuotaService quotaService)
         {
             _geminiService = geminiService;
             _imageService = imageService;
@@ -46,6 +49,7 @@ namespace EduVision.Controllers
             _mongoDbService = mongoDbService;
             _dbContext = dbContext;
             _logger = logger;
+            _quotaService = quotaService;
         }
 
         [HttpGet("subjects")]
@@ -96,6 +100,37 @@ namespace EduVision.Controllers
                 return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
 
             }
+
+            // --- B??c ki?m tra quota ---
+            var quotaType = request.Mode?.ToLower() switch
+            {
+                "slides" => "slides",
+                "video" => "video",
+                _ => throw new ArgumentException("Invalid mode")
+            };
+            // L?y user
+            var user = await _dbContext.Users.FindAsync(userId);
+
+            if (user == null)
+            {
+                return BadRequest(ApiResponse<string>.Fail("User does not exist", 404));
+            }
+
+            // N?u là manager thì b? qua quota check
+           
+                // Correcting the condition to properly compare the user's role
+                if ((Role)user.Role != Role.MANAGER) {
+                bool hasQuota = await _quotaService.CheckQuotaAsync(userId, quotaType);
+                if (!hasQuota)
+                {
+                    return BadRequest(ApiResponse<string>.Fail("You have exceeded the number of lesson creations for the month", 400));
+                }
+            }
+               
+            
+        
+            // --- End ki?m tra quota ---
+
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
             {
                 return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
@@ -173,6 +208,8 @@ namespace EduVision.Controllers
                 // Save to DB for "slides" mode
                 if (request.Mode == "slides")
                 {
+                    bool saved = false;
+
                     using var transaction = await _dbContext.Database.BeginTransactionAsync();
                     try
                     {
@@ -199,13 +236,33 @@ namespace EduVision.Controllers
                         await _dbContext.SaveChangesAsync();
 
                         await transaction.CommitAsync();
+                        saved = true;
                     }
                     catch (Exception ex)
                     {
-                        await transaction.RollbackAsync();
                         _logger.LogError(ex, "Database error while saving slides lesson");
+                        try
+                        {
+                            await transaction.RollbackAsync();
+                        }
+                        catch (Exception rollbackEx)
+                        {
+                            _logger.LogError(rollbackEx, "Failed to rollback transaction");
+                        }
                         return StatusCode(500, ApiResponse<string>.Fail("Failed to save lesson data: " + ex.Message, 500));
+                    }
 
+                    if (saved)
+                    {
+                        try
+                        {
+                            await _quotaService.IncrementQuotaUsedAsync(userId, "slides");
+                        }
+                        catch (Exception quotaEx)
+                        {
+                            _logger.LogError(quotaEx, "Failed to update quota usage after saving slides");
+                            // Optional: rollback quota if needed
+                        }
                     }
 
                     totalSw.Stop();
@@ -219,6 +276,8 @@ namespace EduVision.Controllers
                         SlideUrl = slideUrl
                     }));
                 }
+
+            
 
                 // Continue for "video" mode
                 await AssignAudioToSlidesAsync(slides, lessonId);
@@ -277,6 +336,8 @@ namespace EduVision.Controllers
                         await _dbContext.SaveChangesAsync();
 
                         await transaction.CommitAsync();
+                        await _quotaService.CheckQuotaAsync(userId, "video");
+                        await _quotaService.IncrementQuotaUsedAsync(userId, "video");
                     }
                     catch (Exception ex)
                     {
@@ -299,6 +360,7 @@ namespace EduVision.Controllers
                     VideoUrl = videoUrl
                 }));
 
+
             }
             catch (Exception ex)
             {
@@ -306,6 +368,7 @@ namespace EduVision.Controllers
                 return StatusCode(500, ApiResponse<string>.Fail("Failed to generate education lesson: " + ex.Message, 500));
 
             }
+
         }
 
         private async Task AssignAudioToSlidesAsync(List<LessonSlideDto> slides, string lessonId)

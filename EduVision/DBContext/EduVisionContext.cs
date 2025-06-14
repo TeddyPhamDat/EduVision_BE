@@ -28,11 +28,15 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<Prompt> Prompts { get; set; }
 
-    public virtual DbSet<Quotum> Quota { get; set; }
-
     public virtual DbSet<Slide> Slides { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
+
+    public virtual DbSet<UserQuotum> UserQuota { get; set; }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
+        => optionsBuilder.UseSqlServer("Data Source=TEDDY\\TEDDY;Initial Catalog=EduVision;User ID=sa;Password=12345;Encrypt=False");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -123,6 +127,9 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.CreatedAt)
                 .HasColumnType("datetime")
                 .HasColumnName("created_at");
+            entity.Property(e => e.OrderCode)
+                .HasMaxLength(50)
+                .HasColumnName("orderCode");
             entity.Property(e => e.Status)
                 .HasMaxLength(50)
                 .HasColumnName("status");
@@ -152,24 +159,6 @@ public partial class EduVisionContext : DbContext
             entity.HasOne(d => d.User).WithMany(p => p.Prompts)
                 .HasForeignKey(d => d.UserId)
                 .HasConstraintName("FK__Prompt__user_id__440B1D61");
-        });
-
-        modelBuilder.Entity<Quotum>(entity =>
-        {
-            entity.HasKey(e => e.QuotaId).HasName("PK__Quota__DC48C722FCB8CD1E");
-
-            entity.Property(e => e.QuotaId).HasColumnName("quotaID");
-            entity.Property(e => e.DailyLimit).HasColumnName("daily_limit");
-            entity.Property(e => e.LastReset).HasColumnName("last_reset");
-            entity.Property(e => e.Status)
-                .HasMaxLength(50)
-                .HasColumnName("status");
-            entity.Property(e => e.UsedWeek).HasColumnName("used_week");
-            entity.Property(e => e.UserId).HasColumnName("user_id");
-
-            entity.HasOne(d => d.User).WithMany(p => p.Quota)
-                .HasForeignKey(d => d.UserId)
-                .HasConstraintName("FK__Quota__user_id__412EB0B6");
         });
 
         modelBuilder.Entity<Slide>(entity =>
@@ -223,6 +212,30 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.UserName)
                 .HasMaxLength(255)
                 .HasColumnName("userName");
+        });
+
+        modelBuilder.Entity<UserQuotum>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PK__UserQuot__3214EC07D37D544A");
+
+            entity.HasIndex(e => new { e.UserId, e.QuotaType, e.PeriodStart }, "UQ_UserQuota").IsUnique();
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime");
+            entity.Property(e => e.PeriodEnd).HasColumnType("datetime");
+            entity.Property(e => e.PeriodStart).HasColumnType("datetime");
+            entity.Property(e => e.QuotaType)
+                .IsRequired()
+                .HasMaxLength(50);
+            entity.Property(e => e.UpdatedAt)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime");
+
+            entity.HasOne(d => d.User).WithMany(p => p.UserQuota)
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_UserQuota_User");
         });
 
         OnModelCreatingPartial(modelBuilder);

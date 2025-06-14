@@ -163,6 +163,18 @@ public class AuthController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        var periodStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        var periodEnd = periodStart.AddMonths(1).AddDays(-1);
+
+        var quotas = new List<UserQuotum>
+{
+    new UserQuotum { UserId = user.UserId, QuotaType = "video", QuotaLimit = 1, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+    new UserQuotum { UserId = user.UserId, QuotaType = "slides", QuotaLimit = 5, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+};
+
+        _context.UserQuota.AddRange(quotas);
+        await _context.SaveChangesAsync();
+
         var response = new LoginResponse
         {
             Token = "",
@@ -219,6 +231,19 @@ public class AuthController : ControllerBase
             };
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
+
+            var periodStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+            var periodEnd = periodStart.AddMonths(1).AddDays(-1);
+
+            var quotas = new List<UserQuotum>
+{
+    new UserQuotum { UserId = user.UserId, QuotaType = "video", QuotaLimit = 1, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+    new UserQuotum { UserId = user.UserId, QuotaType = "slides", QuotaLimit = 5, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+};
+
+            _context.UserQuota.AddRange(quotas);
+            await _context.SaveChangesAsync();
+
         }
 
         var token = _jwtService.GenerateToken(user);

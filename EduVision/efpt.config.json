@@ -35,15 +35,15 @@
          "ObjectType": 0
       },
       {
-         "Name": "[dbo].[Quota]",
-         "ObjectType": 0
-      },
-      {
          "Name": "[dbo].[Slide]",
          "ObjectType": 0
       },
       {
          "Name": "[dbo].[User]",
+         "ObjectType": 0
+      },
+      {
+         "Name": "[dbo].[UserQuota]",
          "ObjectType": 0
       }
    ],
