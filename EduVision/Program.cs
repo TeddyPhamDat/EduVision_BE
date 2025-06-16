@@ -59,7 +59,12 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "EduVision API", Version = "v1" });
+    c.SwaggerDoc("v2", new OpenApiInfo
+    {
+        Title = "EduVision API",
+        Version = "v2",
+        Description = "EduVision API provides endpoints for generating educational slides and video lessons using AI. Use the endpoints below to create, manage, and retrieve educational content."
+    });
 
     // Add JWT Bearer authentication to Swagger UI so that protected endpoints can be tested.
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -86,6 +91,11 @@ builder.Services.AddSwaggerGen(c =>
             Array.Empty<string>()
         }
     });
+
+    // Enable XML comments
+    var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    c.IncludeXmlComments(xmlPath);
 });
 
 // In development, load sensitive configuration from a separate secrets file.
@@ -102,14 +112,15 @@ builder.Services.AddOptions<MongoDbConfig>()
     .Bind(builder.Configuration.GetSection("MongoDB"))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddSingleton<MongoDbService>();
+builder.Services.AddSingleton<IMongoDbService, MongoDbService>();
 
 // Register Gemini AI configuration and service for slide generation.
 builder.Services.AddOptions<GeminiConfig>()
     .Bind(builder.Configuration.GetSection("Gemini"))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddSingleton<GeminiService>(sp =>
+
+builder.Services.AddSingleton<IGeminiService>(sp =>
 {
     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
     var options = sp.GetRequiredService<IOptions<GeminiConfig>>();
@@ -122,7 +133,6 @@ builder.Services.AddSingleton<GeminiService>(sp =>
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddTransient<IEmailSender, EmailSender>();
-builder.Services.AddSingleton<CloudinaryImageService>();
 builder.Services.AddScoped<IQuotaService, QuotaService>();
 
 // Register PayOS payment gateway client for handling payment operations.
@@ -135,7 +145,11 @@ builder.Services.AddSingleton(new PayOS(clientId, apiKey, checksumKey));
 // Register services for presentation and media generation.
 builder.Services.AddSingleton<RevealJsGenerator>();
 builder.Services.AddSingleton<AzureBlobStorageService>();
+builder.Services.AddScoped<IImageStorageService, AzureBlobImageStorage>();
 builder.Services.AddSingleton<SlideCaptureService>();
+builder.Services.AddSingleton<IVideoSegmentCreator, FfmpegSegmentCreator>();
+builder.Services.AddSingleton<IVideoConcatenator, FfmpegVideoConcatenator>();
+builder.Services.AddSingleton<IVideoStorageService, AzureBlobVideoStorage>();
 builder.Services.AddSingleton<VideoGenerationService>();
 
 // Register configuration for screenshot API integration.
@@ -184,7 +198,11 @@ var app = builder.Build();
 
 // Enable Swagger UI for API exploration and testing.
 app.UseSwagger();
-app.UseSwaggerUI();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v2/swagger.json", "EduVision API v2");
+    // c.RoutePrefix = string.Empty; // Uncomment to serve at root
+});
 
 // Set up a global exception handler to return a generic error response for unhandled exceptions.
 // This prevents leaking sensitive error details to clients.

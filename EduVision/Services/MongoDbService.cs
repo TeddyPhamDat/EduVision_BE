@@ -7,7 +7,7 @@ using System.Text;
 
 namespace EduVision.Services
 {
-    public class MongoDbService
+    public class MongoDbService : IMongoDbService
     {
         private readonly IMongoDatabase _database;
         private readonly ILogger<MongoDbService> _logger;

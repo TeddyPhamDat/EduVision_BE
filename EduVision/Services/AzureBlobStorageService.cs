@@ -9,6 +9,9 @@ namespace EduVision.Services
         private readonly string _connectionString;
         private readonly string _containerName;
 
+        public string ConnectionString => _connectionString;
+        public string ContainerName => _containerName;
+
         public AzureBlobStorageService(IConfiguration config)
         {
             _connectionString = config["AzureBlob:ConnectionString"] ?? throw new ArgumentNullException("Azure:BlobConnectionString is missing in configuration");

@@ -9,15 +9,16 @@ using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.SqlServer.Server;
-using Newtonsoft.Json.Linq;
 using System;
 using LoginRequest = EduVision.Models.DTO.Request.LoginRequest;
 using RegisterRequest = EduVision.Models.DTO.Request.RegisterRequest;
 
-
+/// <summary>
+/// Controller for authentication and registration flows.
+/// Follows RESTful conventions: pluralized, hyphenated nouns for resource URIs.
+/// </summary>
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/authentication")]
 public class AuthController : ControllerBase
 {
     private readonly JwtService _jwtService;
@@ -31,14 +32,16 @@ public class AuthController : ControllerBase
         _emailSender = emailSender;
     }
 
-    [HttpPost("login")]
-    public IActionResult Login([FromBody] LoginRequest request)
+    /// <summary>
+    /// Authenticate user and return JWT token.
+    /// </summary>
+    [HttpPost("sessions")]
+    public IActionResult CreateSession([FromBody] LoginRequest request)
     {
         var user = _context.Users.FirstOrDefault(u => u.UserName == request.Username);
 
         if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.Password))
             return Unauthorized(ApiResponse<object>.Fail("Invalid username or password", 401));
-
 
         var token = _jwtService.GenerateToken(user);
 
@@ -54,8 +57,11 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse<LoginResponse>.Success(response));
     }
 
-    [HttpPost("register")]
-    public async Task<IActionResult> Register([FromBody] RegisterRequest request)
+    /// <summary>
+    /// Initiate registration and send OTP to email.
+    /// </summary>
+    [HttpPost("registrations")]
+    public async Task<IActionResult> CreateRegistration([FromBody] RegisterRequest request)
     {
         if (string.IsNullOrEmpty(request.Email))
             return BadRequest(ApiResponse<string>.Fail("Email cannot be blank", 400));
@@ -67,7 +73,6 @@ public class AuthController : ControllerBase
             if ((bool)existingUser.IsVerified)
                 return BadRequest(ApiResponse<string>.Fail("Email has been registered", 400));
 
-            
             var oldOtp = await _context.OtpTokens
                 .Where(o => o.Email == request.Email && o.Used == false)
                 .OrderByDescending(o => o.CreatedAt)
@@ -78,7 +83,7 @@ public class AuthController : ControllerBase
                 return Ok(ApiResponse<string>.Success("", "OTP has been sent. Please check your email."));
             }
 
-            //lmao
+            // Send a new OTP if the previous one is expired or used.
             var newOtp = new OtpToken
             {
                 Email = request.Email,
@@ -94,7 +99,7 @@ public class AuthController : ControllerBase
             return Ok(ApiResponse<string>.Success("", "New OTP has been sent again"));
         }
 
-        
+        // Create a new user and send OTP for verification.
         var newUser = new User
         {
             Email = request.Email,
@@ -118,9 +123,10 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse<string>.Success("", "OTP sent to email"));
     }
 
-
-
-    [HttpPost("complete-registration")]
+    /// <summary>
+    /// Complete registration by verifying OTP and setting password.
+    /// </summary>
+    [HttpPost("registrations/complete")]
     public async Task<IActionResult> CompleteRegistration([FromBody] CompleteRegistrationRequest request)
     {
         if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.OtpToken)
@@ -150,10 +156,7 @@ public class AuthController : ControllerBase
         if (user.IsVerified == true)
             return BadRequest(ApiResponse<string>.Fail("Account already verified", 400));
 
-      
         otp.Used = true;
-
-        
         user.IsVerified = true;
         user.FullName = request.FullName;
         user.Password = BCrypt.Net.BCrypt.HashPassword(request.Password);
@@ -163,14 +166,15 @@ public class AuthController : ControllerBase
 
         await _context.SaveChangesAsync();
 
+        // Assign default quotas for new users.
         var periodStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
         var periodEnd = periodStart.AddMonths(1).AddDays(-1);
 
         var quotas = new List<UserQuotum>
-{
-    new UserQuotum { UserId = user.UserId, QuotaType = "video", QuotaLimit = 1, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-    new UserQuotum { UserId = user.UserId, QuotaType = "slides", QuotaLimit = 5, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
-};
+        {
+            new UserQuotum { UserId = user.UserId, QuotaType = "video", QuotaLimit = 1, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+            new UserQuotum { UserId = user.UserId, QuotaType = "slides", QuotaLimit = 5, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+        };
 
         _context.UserQuota.AddRange(quotas);
         await _context.SaveChangesAsync();
@@ -187,8 +191,11 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse<LoginResponse>.Success(response, "Registration completed successfully"));
     }
 
-    [HttpPost("google-login")]
-    public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest request)
+    /// <summary>
+    /// Authenticate or register user using Google OAuth and return JWT token.
+    /// </summary>
+    [HttpPost("google-sessions")]
+    public async Task<IActionResult> CreateGoogleSession([FromBody] GoogleLoginRequest request)
     {
         GoogleJsonWebSignature.Payload payload;
         try
@@ -208,17 +215,14 @@ public class AuthController : ControllerBase
 
         if (user != null)
         {
-          
             if (user.IsVerified == false)
             {
                 return BadRequest(ApiResponse<string>.Fail("The account has not been authenticated via OTP", 400));
             }
-
-            
         }
         else
         {
-            
+            // Register new user from Google account.
             user = new User
             {
                 Email = email,
@@ -232,18 +236,18 @@ public class AuthController : ControllerBase
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
+            // Assign default quotas for new Google users.
             var periodStart = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
             var periodEnd = periodStart.AddMonths(1).AddDays(-1);
 
             var quotas = new List<UserQuotum>
-{
-    new UserQuotum { UserId = user.UserId, QuotaType = "video", QuotaLimit = 1, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
-    new UserQuotum { UserId = user.UserId, QuotaType = "slides", QuotaLimit = 5, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
-};
+            {
+                new UserQuotum { UserId = user.UserId, QuotaType = "video", QuotaLimit = 1, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow },
+                new UserQuotum { UserId = user.UserId, QuotaType = "slides", QuotaLimit = 5, QuotaUsed = 0, PeriodStart = periodStart, PeriodEnd = periodEnd, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow }
+            };
 
             _context.UserQuota.AddRange(quotas);
             await _context.SaveChangesAsync();
-
         }
 
         var token = _jwtService.GenerateToken(user);
@@ -251,12 +255,13 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse<string>.Success(token, "Sign in successfully with Google"));
     }
 
-
-
+    /// <summary>
+    /// Generates a 6-digit OTP code for email verification.
+    /// </summary>
     private string GenerateOtpToken()
     {
         var random = new Random();
-        return random.Next(100000, 999999).ToString(); // mã OTP
+        return random.Next(100000, 999999).ToString();
     }
 }
 

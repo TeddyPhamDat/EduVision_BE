@@ -9,18 +9,22 @@ using Microsoft.EntityFrameworkCore;
 using Net.payOS;
 using Net.payOS.Types;
 using System;
-using System.Text.Json;
 
 namespace EduVision.Controllers
 {
-    [Route("api/[controller]")]
+    // This controller manages payment status checking and quota updates after payment.
+    // API naming convention: Use plural, hyphenated nouns for resource URIs (e.g., /api/payments).
+    // Parameters are passed as query or body parameters, not as route segments, to keep URIs clean and RESTful.
     [ApiController]
+    [Route("api/payments")]
     public class PaymentController : ControllerBase
     {
         private readonly PayOS _payOS;
-        private readonly IQuotaService _quotaService; // Giả sử bạn có service để xử lý quota
+        private readonly IQuotaService _quotaService;
         private readonly EduVisionContext _context;
 
+        // Constructor injects payment gateway, quota service, and database context.
+        // Why: Follows dependency injection for testability and separation of concerns.
         public PaymentController(PayOS payOS, IQuotaService quotaService, EduVisionContext context)
         {
             _payOS = payOS;
@@ -28,16 +32,22 @@ namespace EduVision.Controllers
             _context = context;
         }
 
-        [HttpGet("check-status")]
+        /// <summary>
+        /// Checks the payment status for a given order code and updates quota if paid.
+        /// </summary>
+        [HttpGet("status")]
         public async Task<IActionResult> CheckPaymentStatus([FromQuery] long orderCode)
         {
+            // Query the payment gateway for the payment status.
             var result = await _payOS.getPaymentLinkInformation(orderCode);
 
             if (result.status == "PAID")
             {
+                // Find the payment record in the database.
                 var payment = await _context.Payments.FirstOrDefaultAsync(p => p.OrderCode == orderCode.ToString());
                 if (payment != null && payment.Status != "success")
                 {
+                    // Mark payment as successful and update user quota.
                     payment.Status = "success";
                     if (payment.UserId.HasValue && payment.Amount.HasValue)
                     {
@@ -45,9 +55,11 @@ namespace EduVision.Controllers
                     }
                     await _context.SaveChangesAsync();
                 }
+                // Return success response to the client.
                 return Ok(ApiResponse<object>.Success(null, "Paid & Quota Updated", 0));
             }
 
+            // Return failure response if not paid.
             return Ok(ApiResponse<object>.Fail("Not Paid", -1));
         }
     }

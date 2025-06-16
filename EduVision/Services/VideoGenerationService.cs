@@ -7,20 +7,29 @@ using EduVision.Models.DTO;
 
 namespace EduVision.Services
 {
+    // This service orchestrates the creation of video segments from images and audio (via IVideoSegmentCreator),
+    // concatenation of those segments (via IVideoConcatenator), and final upload (via IVideoStorageService).
+    // Breaking it into separate interfaces allows for easier testing, maintenance, and future development.
     public class VideoGenerationService
     {
-        private readonly AzureBlobStorageService _blobStorage;
-        private readonly ILogger<VideoGenerationService> _logger;
+        private readonly IVideoSegmentCreator _segmentCreator;
+        private readonly IVideoConcatenator _concatenator;
+        private readonly IVideoStorageService _storageService;
         private readonly HttpClient _httpClient;
+        private readonly ILogger<VideoGenerationService> _logger;
 
         public VideoGenerationService(
-            AzureBlobStorageService blobStorage,
-            ILogger<VideoGenerationService> logger,
-            HttpClient httpClient)
+            IVideoSegmentCreator segmentCreator,
+            IVideoConcatenator concatenator,
+            IVideoStorageService storageService,
+            HttpClient httpClient,
+            ILogger<VideoGenerationService> logger)
         {
-            _blobStorage = blobStorage;
-            _logger = logger;
+            _segmentCreator = segmentCreator;
+            _concatenator = concatenator;
+            _storageService = storageService;
             _httpClient = httpClient;
+            _logger = logger;
         }
 
         public async Task<string> GenerateVideoAsync(List<LessonSlideDto> slides, string lessonId)
@@ -29,137 +38,55 @@ namespace EduVision.Services
                 throw new ArgumentException("Slides cannot be null or empty", nameof(slides));
 
             var tempDir = Path.Combine(Path.GetTempPath(), $"video_gen_{lessonId}_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(tempDir);
+            var segmentPaths = new List<string>();
 
             try
             {
-                Directory.CreateDirectory(tempDir);
-                _logger.LogInformation($"Created temp directory: {tempDir}");
-
-                var segmentFiles = new List<string>();
-
-                // Download images and audio, create video segments
+                // 1. Download images/audio and create segments
                 for (int i = 0; i < slides.Count; i++)
                 {
-                    _logger.LogInformation($"Processing slide {i + 1}/{slides.Count}");
-
-                    var slide = slides[i];
                     var imagePath = Path.Combine(tempDir, $"slide{i}.png");
                     var audioPath = Path.Combine(tempDir, $"audio{i}.wav");
                     var segmentPath = Path.Combine(tempDir, $"segment{i}.mp4");
 
-                    // Validate URLs
-                    if (string.IsNullOrEmpty(slide.CapturedImageUrl) || string.IsNullOrEmpty(slide.AudioUrl))
-                    {
-                        _logger.LogWarning($"Slide {i} has missing URLs - Image: {slide.CapturedImageUrl}, Audio: {slide.AudioUrl}");
-                        continue;
-                    }
+                    // Download resources
+                    var imgBytes = await _httpClient.GetByteArrayAsync(slides[i].CapturedImageUrl);
+                    await File.WriteAllBytesAsync(imagePath, imgBytes);
 
-                    try
-                    {
-                        // Download image
-                        _logger.LogDebug($"Downloading image from: {slide.CapturedImageUrl}");
-                        var imgBytes = await _httpClient.GetByteArrayAsync(slide.CapturedImageUrl);
-                        await File.WriteAllBytesAsync(imagePath, imgBytes);
+                    var audioBytes = await _httpClient.GetByteArrayAsync(slides[i].AudioUrl);
+                    await File.WriteAllBytesAsync(audioPath, audioBytes);
 
-                        // Download audio
-                        _logger.LogDebug($"Downloading audio from: {slide.AudioUrl}");
-                        var audioBytes = await _httpClient.GetByteArrayAsync(slide.AudioUrl);
-                        await File.WriteAllBytesAsync(audioPath, audioBytes);
-
-                        // Verify files exist and have content
-                        if (!File.Exists(imagePath) || new FileInfo(imagePath).Length == 0)
-                            throw new InvalidOperationException($"Image file is empty or doesn't exist: {imagePath}");
-
-                        if (!File.Exists(audioPath) || new FileInfo(audioPath).Length == 0)
-                            throw new InvalidOperationException($"Audio file is empty or doesn't exist: {audioPath}");
-
-                        // Create video segment with Xabe.FFmpeg
-                        _logger.LogDebug($"Creating video segment: {segmentPath}");
-
-                        var mediaInfo = await FFmpeg.GetMediaInfo(audioPath);
-                        var audioDuration = mediaInfo.Duration;
-
-                        var conversion = FFmpeg.Conversions.New()
-                            .AddParameter($"-loop 1 -i \"{imagePath}\" -i \"{audioPath}\" -c:v libx264 -t {audioDuration.TotalSeconds} -vf \"scale=1920:1080\" -c:a aac -b:a 192k -shortest -pix_fmt yuv420p \"{segmentPath}\"");
-
-                        await conversion.Start();
-
-                        if (!File.Exists(segmentPath) || new FileInfo(segmentPath).Length == 0)
-                            throw new InvalidOperationException($"Failed to create video segment: {segmentPath}");
-
-                        segmentFiles.Add(segmentPath);
-                        _logger.LogDebug($"Successfully created segment: {segmentPath}");
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError($"Error processing slide {i}: {ex.Message}");
-                        throw;
-                    }
+                    // Create segment
+                    await _segmentCreator.CreateSegmentAsync(imagePath, audioPath, segmentPath);
+                    segmentPaths.Add(segmentPath);
                 }
 
-                if (!segmentFiles.Any())
+                if (!segmentPaths.Any())
                     throw new InvalidOperationException("No video segments were created");
 
-                // Concatenate segments
-                _logger.LogInformation("Concatenating video segments");
-                var finalVideoPath = await ConcatenateSegments(segmentFiles, tempDir);
+                // 2. Concatenate segments
+                var finalVideoPath = Path.Combine(tempDir, "final.mp4");
+                await _concatenator.ConcatenateAsync(segmentPaths, finalVideoPath);
 
-                // Upload to Azure Blob Storage
-                _logger.LogInformation("Uploading final video to blob storage");
-                using var fs = File.OpenRead(finalVideoPath);
-                var videoBlobName = $"presentations/{lessonId}/final_{DateTime.UtcNow:yyyyMMdd_HHmmss}.mp4";
-                var videoUrl = await _blobStorage.UploadAsync(videoBlobName, fs, "video/mp4");
-
-                _logger.LogInformation($"Video generation completed successfully. URL: {videoUrl}");
+                // 3. Upload final video
+                var uniqueTimestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+                var blobName = $"presentations/{lessonId}/final_{uniqueTimestamp}.mp4";
+                var videoUrl = await _storageService.UploadAsync(finalVideoPath, blobName, "video/mp4");
                 return videoUrl;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error generating video: {ex.Message}");
-                throw;
             }
             finally
             {
-                // Cleanup
+                // Cleanup temp files
                 try
                 {
-                    if (Directory.Exists(tempDir))
-                    {
-                        Directory.Delete(tempDir, recursive: true);
-                        _logger.LogDebug($"Cleaned up temp directory: {tempDir}");
-                    }
+                    Directory.Delete(tempDir, recursive: true);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning($"Failed to cleanup temp directory {tempDir}: {ex.Message}");
+                    _logger.LogWarning("Failed cleaning up {tempDir}: {ex}", tempDir, ex.Message);
                 }
             }
-        }
-
-        private async Task<string> ConcatenateSegments(List<string> segmentFiles, string tempDir)
-        {
-            var finalVideoPath = Path.Combine(tempDir, "final.mp4");
-
-            if (segmentFiles.Count == 1)
-            {
-                File.Copy(segmentFiles[0], finalVideoPath, overwrite: true);
-                return finalVideoPath;
-            }
-
-            // Create concat file for FFmpeg
-            var concatListPath = Path.Combine(tempDir, "concat.txt");
-            var concatContent = segmentFiles.Select(f => $"file '{f.Replace("\\", "/")}'");
-            await File.WriteAllLinesAsync(concatListPath, concatContent);
-
-            var conversion = FFmpeg.Conversions.New()
-                .AddParameter($"-f concat -safe 0 -i \"{concatListPath}\" -c copy \"{finalVideoPath}\"");
-
-            await conversion.Start();
-
-            if (!File.Exists(finalVideoPath) || new FileInfo(finalVideoPath).Length == 0)
-                throw new InvalidOperationException("Failed to create final concatenated video");
-
-            return finalVideoPath;
         }
     }
 }

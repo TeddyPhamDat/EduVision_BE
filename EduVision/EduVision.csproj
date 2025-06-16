@@ -4,6 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,7 +18,6 @@
   <ItemGroup>
     <PackageReference Include="Azure.Storage.Blobs" Version="12.24.0" />
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
-    <PackageReference Include="CloudinaryDotNet" Version="1.27.5" />
     <PackageReference Include="FFMpegCore" Version="5.2.0" />
     <PackageReference Include="Google.Apis.Auth" Version="1.69.0" />
     <PackageReference Include="HtmlAgilityPack" Version="1.12.1" />
@@ -64,6 +65,9 @@
 	</ItemGroup>
 	<ItemGroup>
 	  <None Include="efpt.config.json.user" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Secrets\" />
 	</ItemGroup>
 
 </Project>

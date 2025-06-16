@@ -8,23 +8,23 @@ using EduVision.Models.DTO;
 
 namespace EduVision.Services
 {
-    public class GeminiService
+    public class GeminiService : IGeminiService
     {
         private readonly HttpClient _httpClient;
         private readonly string? _apiKey;
         private readonly ILogger<GeminiService> _logger;
-        private readonly MongoDbService? _mongoDbService;
+        private readonly IMongoDbService _mongoDbService;
 
         public GeminiService(
             HttpClient httpClient,
             IOptions<GeminiConfig> config,
             ILogger<GeminiService> logger,
-            MongoDbService? mongoDbService = null)
+            IMongoDbService mongoDbService)
         {
             _httpClient = httpClient;
             _apiKey = config.Value.ApiKey;
             _logger = logger;
-            _mongoDbService = mongoDbService;
+            _mongoDbService = mongoDbService ?? throw new ArgumentNullException(nameof(mongoDbService));
         }
 
         public async Task<SlideGenerationResultDto> GenerateEducationSlidesAsync(string subject, string chapter, int? grade = null)
