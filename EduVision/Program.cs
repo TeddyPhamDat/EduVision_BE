@@ -1,7 +1,13 @@
 using EduVision.DBContext;
 using EduVision.Models.Config;
 using EduVision.Models.DTO.Response;
-using EduVision.Services;
+using EduVision.Services.AI;
+using EduVision.Services.Authentication;
+using EduVision.Services.Data;
+using EduVision.Services.Media;
+using EduVision.Services.Messaging;
+using EduVision.Services.Presentation;
+using EduVision.Services.Storage;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -107,12 +113,19 @@ if (builder.Environment.IsDevelopment())
 
 //---------------------- Register custom and infrastructure services ----------------------
 
+// Register Kafka producer service for slide generation events.
+builder.Services.Configure<KafkaConfig>(builder.Configuration.GetSection("Kafka"));
+builder.Services.AddSingleton<KafkaProducerService>();
+
+// Register Kafka consumer service for processing slide generation requests.
+builder.Services.AddHostedService<SlideGenerationConsumer>();
+
 // Register MongoDB configuration and service for accessing educational content.
 builder.Services.AddOptions<MongoDbConfig>()
     .Bind(builder.Configuration.GetSection("MongoDB"))
     .ValidateDataAnnotations()
     .ValidateOnStart();
-builder.Services.AddSingleton<IMongoDbService, MongoDbService>();
+builder.Services.AddScoped<IMongoDbService, MongoDbService>();
 
 // Register Gemini AI configuration and service for slide generation.
 builder.Services.AddOptions<GeminiConfig>()
@@ -120,12 +133,12 @@ builder.Services.AddOptions<GeminiConfig>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-builder.Services.AddSingleton<IGeminiService>(sp =>
+builder.Services.AddScoped<IGeminiService>(sp =>
 {
     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient();
     var options = sp.GetRequiredService<IOptions<GeminiConfig>>();
     var logger = sp.GetRequiredService<ILogger<GeminiService>>();
-    var mongoDbService = sp.GetRequiredService<MongoDbService>();
+    var mongoDbService = sp.GetRequiredService<IMongoDbService>();
     return new GeminiService(httpClient, options, logger, mongoDbService);
 });
 
@@ -143,14 +156,15 @@ var checksumKey = configuration["PayOS:ChecksumKey"];
 builder.Services.AddSingleton(new PayOS(clientId, apiKey, checksumKey));
 
 // Register services for presentation and media generation.
-builder.Services.AddSingleton<RevealJsGenerator>();
+builder.Services.AddScoped<SlideImageSelectorService>();
+builder.Services.AddScoped<RevealJsGenerator>();
 builder.Services.AddSingleton<AzureBlobStorageService>();
 builder.Services.AddScoped<IImageStorageService, AzureBlobImageStorage>();
-builder.Services.AddSingleton<SlideCaptureService>();
-builder.Services.AddSingleton<IVideoSegmentCreator, FfmpegSegmentCreator>();
-builder.Services.AddSingleton<IVideoConcatenator, FfmpegVideoConcatenator>();
-builder.Services.AddSingleton<IVideoStorageService, AzureBlobVideoStorage>();
-builder.Services.AddSingleton<VideoGenerationService>();
+builder.Services.AddScoped<SlideCaptureService>();
+builder.Services.AddScoped<IVideoSegmentCreator, FfmpegSegmentCreator>();
+builder.Services.AddScoped<IVideoConcatenator, FfmpegVideoConcatenator>();
+builder.Services.AddScoped<IVideoStorageService, AzureBlobVideoStorage>();
+builder.Services.AddScoped<VideoGenerationService>();
 
 // Register configuration for screenshot API integration.
 builder.Services.Configure<ScreenshotApiConfig>(
@@ -161,7 +175,7 @@ builder.Services.AddDbContext<EduVisionContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Register text-to-speech service for generating audio from text.
-builder.Services.AddSingleton<TextToSpeechService>();
+builder.Services.AddScoped<TextToSpeechService>();
 
 // Configure JWT authentication for securing API endpoints.
 builder.Services.AddAuthentication("Bearer")

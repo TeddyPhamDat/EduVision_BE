@@ -1,6 +1,6 @@
 using Xabe.FFmpeg;
 
-namespace EduVision.Services
+namespace EduVision.Services.Media
 {
     public class FfmpegVideoConcatenator : IVideoConcatenator
     {

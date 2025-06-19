@@ -8,7 +8,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace EduVision.Services
+namespace EduVision.Services.Authentication
 {
     public class JwtService : IJwtService
     {

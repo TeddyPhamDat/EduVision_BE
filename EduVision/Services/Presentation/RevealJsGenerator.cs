@@ -2,8 +2,9 @@
 using System.IO;
 using System.Threading.Tasks;
 using EduVision.Models.DTO;
+using EduVision.Services.Storage;
 
-namespace EduVision.Services
+namespace EduVision.Services.Presentation
 {
     public class RevealJsGenerator
     {

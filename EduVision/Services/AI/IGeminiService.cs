@@ -1,7 +1,7 @@
 using EduVision.Models.DTO;
 using System.Threading.Tasks;
 
-namespace EduVision.Services
+namespace EduVision.Services.AI
 {
     public interface IGeminiService
     {

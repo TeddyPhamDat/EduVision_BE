@@ -4,7 +4,10 @@ using EduVision.Models.DTO;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
 using EduVision.Models.Entities.Enum;
-using EduVision.Services;
+using EduVision.Services.AI;
+using EduVision.Services.Data;
+using EduVision.Services.Media;
+using EduVision.Services.Presentation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -31,6 +34,8 @@ namespace EduVision.Controllers
         private readonly EduVisionContext _dbContext;
         private readonly ILogger<EducationController> _logger;
         private readonly IQuotaService _quotaService;
+        private readonly KafkaProducerService _kafkaProducerService;
+        private readonly SlideImageSelectorService _slideImageSelectorService;
 
         // Constructor injects all required services for lesson generation, storage, and quota management.
         // This ensures all business logic is handled by dedicated services, keeping the controller thin.
@@ -43,7 +48,9 @@ namespace EduVision.Controllers
             IMongoDbService mongoDbService,
             EduVisionContext dbContext,
             ILogger<EducationController> logger,
-            IQuotaService quotaService)
+            IQuotaService quotaService,
+            KafkaProducerService kafkaProducerService,
+            SlideImageSelectorService slideImageSelectorService)
         {
             _geminiService = geminiService;
             _revealJsGenerator = revealJsGenerator;
@@ -54,6 +61,8 @@ namespace EduVision.Controllers
             _dbContext = dbContext;
             _logger = logger;
             _quotaService = quotaService;
+            _kafkaProducerService = kafkaProducerService;
+            _slideImageSelectorService = slideImageSelectorService;
         }
 
         /// <summary>
@@ -103,19 +112,15 @@ namespace EduVision.Controllers
         /// Generate slides for a lesson.
         /// </summary>
         // Why: This endpoint is for users who only need visual learning materials, not full video lessons.
-        [Authorize(Roles = "USER")]
+        [Authorize(Roles = "USER,MANAGER,ADMIN")]
         [HttpPost("slides")]
-        [ProducesResponseType(typeof(SlideGenerationResultDto), 200)]
+        [ProducesResponseType(typeof(SlideGenerationResultDto), 202)]
         public async Task<ActionResult<SlideGenerationResultDto>> CreateSlides([FromBody] EducationRequestDto request)
         {
-            // Extract user ID from JWT claims for quota and ownership checks.
             var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
-            {
                 return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
-            }
 
-            // Enforce slide quota for non-manager users to prevent abuse and manage system resources.
             var user = await _dbContext.Users.FindAsync(userId);
             if (user == null)
                 return BadRequest(ApiResponse<string>.Fail("User does not exist", 404));
@@ -126,132 +131,37 @@ namespace EduVision.Controllers
                     return BadRequest(ApiResponse<string>.Fail("You have exceeded the number of slide generations for the month", 400));
             }
 
-            // Validate required parameters to ensure the request is meaningful.
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
                 return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
 
-            var totalSw = Stopwatch.StartNew();
-            _logger.LogInformation("Starting slide generation for subject: {Subject}, chapter: {Chapter}, grade: {Grade}",
-                request.Subject, request.Chapter, request.Grade);
-
-            try
+            // Enqueue the job to Kafka
+            await _kafkaProducerService.ProduceAsync(new SlideGenerationKafkaMessage
             {
-                // Use a default image category if not specified to ensure every slide has an image.
-                string imageCategory = string.IsNullOrEmpty(request.ImageCategory) ? "education" : request.ImageCategory;
-                var sw = Stopwatch.StartNew();
+                UserId = userId,
+                Request = request
+            });
 
-                // Generate slide content using Gemini AI service.
-                var slideResult = await _geminiService.GenerateEducationSlidesAsync(request.Subject, request.Chapter, request.Grade);
+            // Return 202 Accepted
+            return Accepted(ApiResponse<string>.Success("Slide generation request accepted and is being processed."));
+        }
 
-                if (slideResult == null || slideResult.HttpStatusCode != 200)
-                {
-                    return StatusCode(
-                        slideResult?.HttpStatusCode ?? 500,
-                        ApiResponse<string>.Fail(slideResult?.ErrorMessage ?? "Failed to generate slides", slideResult?.HttpStatusCode ?? 500)
-                    );
-                }
+        /// <summary>
+        /// Get all slides created by the authenticated user.
+        /// </summary>
+        [Authorize]
+        [HttpGet("slides")]
+        public async Task<IActionResult> GetMySlides()
+        {
+            var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
+                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
 
-                var slides = slideResult.Slides;
-                if (slides == null || slides.Count == 0)
-                    return BadRequest(ApiResponse<string>.Fail("No slides generated", 400));
+            var slides = await _dbContext.Slides
+                .Where(s => s.UserId == userId)
+                .OrderByDescending(s => s.SlideId)
+                .ToListAsync();
 
-                // Assign images to each slide to enhance engagement and educational value.
-                var imageUrls = await GetBestImagesForSlidesAsync(imageCategory, request.Grade, request.Chapter, slides.Count);
-                if (imageUrls == null || imageUrls.All(string.IsNullOrEmpty))
-                    return BadRequest(ApiResponse<string>.Fail($"No images found for category '{imageCategory}'", 400));
-
-                for (int i = 0; i < slides.Count; i++)
-                    slides[i].ImageUrl = imageUrls[i];
-
-                sw.Stop();
-                _logger.LogInformation("Image fetch and assignment: {Elapsed} ms", sw.ElapsedMilliseconds);
-
-                // Generate a unique lesson ID for storage and retrieval.
-                var lessonId = Guid.NewGuid().ToString("N");
-                string slideUrl;
-                try
-                {
-                    sw.Restart();
-                    // Select the appropriate Reveal.js template based on user preference.
-                    int template = request.Template;
-                    string templateName = template switch
-                    {
-                        2 => "RevealTemplateDark.html",
-                        3 => "RevealTemplateModern.html",
-                        1 => "RevealTemplate.html",
-                        _ => "RevealTemplateDark.html"
-                    };
-                    // Generate the HTML presentation and upload it to storage.
-                    slideUrl = await _revealJsGenerator.GenerateRevealHtmlAsync(slides, lessonId, templateName);
-                    sw.Stop();
-                    _logger.LogInformation("Reveal.js HTML generation: {Elapsed} ms", sw.ElapsedMilliseconds);
-                }
-                catch (Exception ex)
-                {
-                    return StatusCode(500, ApiResponse<string>.Fail("Failed to generate presentation: " + ex.Message, 500));
-                }
-
-                // Save the prompt and slide metadata to the database for tracking and future access.
-                bool saved = false;
-                using var transaction = await _dbContext.Database.BeginTransactionAsync();
-                try
-                {
-                    var promptEntity = new Prompt
-                    {
-                        UserId = userId,
-                        Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - slides",
-                        CreatedAt = DateTime.UtcNow,
-                        Status = "Completed"
-                    };
-                    _dbContext.Prompts.Add(promptEntity);
-                    await _dbContext.SaveChangesAsync();
-
-                    var slideEntity = new Slide
-                    {
-                        PromptId = promptEntity.Promptid,
-                        UserId = userId,
-                        Type = request.Subject,
-                        Url = slideUrl ?? "",
-                        Status = "Completed"
-                    };
-
-                    _dbContext.Slides.Add(slideEntity);
-                    await _dbContext.SaveChangesAsync();
-
-                    await transaction.CommitAsync();
-                    saved = true;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Database error while saving slides lesson");
-                    try { await transaction.RollbackAsync(); } catch (Exception rollbackEx) { _logger.LogError(rollbackEx, "Failed to rollback transaction"); }
-                    return StatusCode(500, ApiResponse<string>.Fail("Failed to save lesson data: " + ex.Message, 500));
-                }
-
-                // Increment the user's quota usage after successful generation.
-                if (saved)
-                {
-                    try { await _quotaService.IncrementQuotaUsedAsync(userId, "slides"); }
-                    catch (Exception quotaEx) { _logger.LogError(quotaEx, "Failed to update quota usage after saving slides"); }
-                }
-
-                totalSw.Stop();
-                _logger.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
-
-                // Return the result to the client.
-                return Ok(ApiResponse<SlideGenerationResultDto>.Success(new SlideGenerationResultDto
-                {
-                    Subject = request.Subject,
-                    Chapter = request.Chapter,
-                    Grade = request.Grade,
-                    SlideUrl = slideUrl,
-                }));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error generating slides");
-                return StatusCode(500, ApiResponse<string>.Fail("Failed to generate slides: " + ex.Message, 500));
-            }
+            return Ok(ApiResponse<List<Slide>>.Success(slides));
         }
 
         /// <summary>
@@ -311,7 +221,7 @@ namespace EduVision.Controllers
                     return BadRequest(ApiResponse<string>.Fail("No slides generated", 400));
 
                 // Assign images to each slide to enhance engagement and educational value.
-                var imageUrls = await GetBestImagesForSlidesAsync(imageCategory, request.Grade, request.Chapter, slides.Count);
+                var imageUrls = await _slideImageSelectorService.GetBestImagesForSlidesAsync(imageCategory, request.Grade, request.Chapter, slides.Count);
                 if (imageUrls == null || imageUrls.All(string.IsNullOrEmpty))
                     return BadRequest(ApiResponse<string>.Fail($"No images found for category '{imageCategory}'", 400));
 
@@ -444,65 +354,6 @@ namespace EduVision.Controllers
                 slide.AudioUrl = await _ttsService.GenerateAudioAsync(slide.Content ?? string.Empty, audioBlobName);
             }));
             await Task.WhenAll(audioTasks);
-        }
-
-        // Select the best images for each slide based on category, grade, and chapter.
-        // Why: Relevant images improve the quality and engagement of generated lessons.
-        private async Task<List<string>?> GetBestImagesForSlidesAsync(
-            string category, int? grade, string chapter, int slideCount)
-        {
-            string gradeStr = grade.HasValue ? $"Grade{grade}" : "None";
-            string chapterStr = !string.IsNullOrWhiteSpace(chapter) ? chapter : "None";
-
-            var images = await _dbContext.Images
-                .Where(i => i.Category == category && i.Status == "Active" &&
-                    (
-                        (i.Grade == gradeStr && i.Chapter == chapterStr)
-                        || (i.Grade == "None" && i.Chapter == "None")
-                    ))
-                .ToListAsync();
-
-            var rng = new Random();
-            var specificImages = images
-                .Where(i => i.Grade == gradeStr && i.Chapter == chapterStr)
-                .Select(i => i.Url)
-                .OrderBy(_ => rng.Next())
-                .ToList();
-
-            var defaultImages = images
-                .Where(i => i.Grade == "None" && i.Chapter == "None")
-                .Select(i => i.Url)
-                .OrderBy(_ => rng.Next())
-                .ToList();
-
-            if (specificImages.Count == 0 && defaultImages.Count == 0)
-                return null;
-
-            var result = new List<string>();
-
-            foreach (var url in specificImages)
-            {
-                if (result.Count < slideCount)
-                    result.Add(url);
-                else
-                    break;
-            }
-
-            int defaultIndex = 0;
-            while (result.Count < slideCount)
-            {
-                if (defaultImages.Count > 0)
-                {
-                    result.Add(defaultImages[defaultIndex % defaultImages.Count]);
-                    defaultIndex++;
-                }
-                else
-                {
-                    result.Add(string.Empty);
-                }
-            }
-
-            return result;
         }
     }
 }

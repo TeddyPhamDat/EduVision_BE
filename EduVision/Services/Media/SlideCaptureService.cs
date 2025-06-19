@@ -2,8 +2,9 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using EduVision.Models.Config;
+using EduVision.Services.Storage;
 
-namespace EduVision.Services
+namespace EduVision.Services.Media
 {
     public class SlideCaptureService
     {

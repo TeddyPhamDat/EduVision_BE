@@ -4,8 +4,9 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using EduVision.Models.DTO;
+using EduVision.Services.Storage;
 
-namespace EduVision.Services
+namespace EduVision.Services.Media
 {
     // This service orchestrates the creation of video segments from images and audio (via IVideoSegmentCreator),
     // concatenation of those segments (via IVideoConcatenator), and final upload (via IVideoStorageService).

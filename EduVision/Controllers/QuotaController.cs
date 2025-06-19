@@ -1,6 +1,6 @@
 ﻿using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
-using EduVision.Services;
+using EduVision.Services.Data;
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 

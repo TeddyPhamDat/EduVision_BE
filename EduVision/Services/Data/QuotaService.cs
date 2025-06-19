@@ -3,7 +3,7 @@ using EduVision.Models;
 using Microsoft.EntityFrameworkCore;
 
 
-namespace EduVision.Services
+namespace EduVision.Services.Data
 {
     public class QuotaService : IQuotaService
     {

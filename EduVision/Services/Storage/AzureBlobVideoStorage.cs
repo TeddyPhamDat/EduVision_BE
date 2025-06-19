@@ -1,4 +1,4 @@
-namespace EduVision.Services
+namespace EduVision.Services.Storage
 {
     public class AzureBlobVideoStorage : IVideoStorageService
     {

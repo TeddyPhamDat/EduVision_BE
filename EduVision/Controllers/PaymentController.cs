@@ -3,7 +3,7 @@ using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
-using EduVision.Services;
+using EduVision.Services.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Net.payOS;

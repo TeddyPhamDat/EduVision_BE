@@ -5,8 +5,9 @@ using System.Text;
 using System.Text.Json;
 using EduVision.Models.Config;
 using EduVision.Models.DTO;
+using EduVision.Services.Data;
 
-namespace EduVision.Services
+namespace EduVision.Services.AI
 {
     public class GeminiService : IGeminiService
     {

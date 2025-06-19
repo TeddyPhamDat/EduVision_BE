@@ -4,8 +4,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
+using EduVision.Services.Storage;
 
-namespace EduVision.Services
+namespace EduVision.Services.Media
 {
     public class TextToSpeechService
     {

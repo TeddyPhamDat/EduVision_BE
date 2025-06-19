@@ -1,4 +1,4 @@
-﻿namespace EduVision.Services
+﻿namespace EduVision.Services.Data
 {
     public interface IQuotaService
     {

@@ -5,7 +5,7 @@ using System.Net.Mail;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace EduVision.Services
+namespace EduVision.Services.Authentication
 {
     public class EmailSender : IEmailSender
     {

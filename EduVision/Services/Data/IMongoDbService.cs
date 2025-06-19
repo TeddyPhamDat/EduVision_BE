@@ -2,7 +2,7 @@ using EduVision.Models.DTO;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 
-namespace EduVision.Services
+namespace EduVision.Services.Data
 {
     public interface IMongoDbService
     {

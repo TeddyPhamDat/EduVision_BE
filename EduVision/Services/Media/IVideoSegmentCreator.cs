@@ -1,4 +1,4 @@
-namespace EduVision.Services
+namespace EduVision.Services.Media
 {
     public interface IVideoSegmentCreator
     {

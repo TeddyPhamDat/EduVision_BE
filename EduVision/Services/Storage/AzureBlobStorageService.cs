@@ -2,7 +2,7 @@ using Azure.Storage.Blobs;
 using System.IO;
 using System.Threading.Tasks;
 
-namespace EduVision.Services
+namespace EduVision.Services.Storage
 {
     public class AzureBlobStorageService
     {

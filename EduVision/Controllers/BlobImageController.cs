@@ -1,7 +1,7 @@
 using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.DTO.Request;
-using EduVision.Services;
+using EduVision.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

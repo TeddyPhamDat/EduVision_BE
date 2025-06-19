@@ -3,7 +3,7 @@ using EduVision.Models;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
 using EduVision.Models.Entities.Enum;
-using EduVision.Services;
+using EduVision.Services.Authentication;
 using Google.Apis.Auth;
 using Google.Apis.Auth.OAuth2.Requests;
 using Microsoft.AspNetCore.Identity.Data;
