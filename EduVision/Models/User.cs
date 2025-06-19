@@ -25,9 +25,13 @@ public partial class User
 
     public int Role { get; set; }
 
+    public virtual ICollection<OtpToken> OtpTokens { get; set; } = new List<OtpToken>();
+
     public virtual ICollection<Payment> Payments { get; set; } = new List<Payment>();
 
     public virtual ICollection<Prompt> Prompts { get; set; } = new List<Prompt>();
+
+    public virtual ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 
     public virtual ICollection<Slide> Slides { get; set; } = new List<Slide>();
 

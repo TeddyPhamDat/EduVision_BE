@@ -28,11 +28,17 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<Prompt> Prompts { get; set; }
 
+    public virtual DbSet<RefreshToken> RefreshTokens { get; set; }
+
     public virtual DbSet<Slide> Slides { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
 
     public virtual DbSet<UserQuotum> UserQuota { get; set; }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
+        => optionsBuilder.UseSqlServer("Data Source=TEDDY\\TEDDY;Initial Catalog=EduVision;User ID=sa;Password=12345;Encrypt=False");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +114,11 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.Used)
                 .HasDefaultValue(false)
                 .HasColumnName("used");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            entity.HasOne(d => d.User).WithMany(p => p.OtpTokens)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("FK_OtpToken_User");
         });
 
         modelBuilder.Entity<Payment>(entity =>
@@ -155,6 +166,26 @@ public partial class EduVisionContext : DbContext
             entity.HasOne(d => d.User).WithMany(p => p.Prompts)
                 .HasForeignKey(d => d.UserId)
                 .HasConstraintName("FK__Prompt__user_id__440B1D61");
+        });
+
+        modelBuilder.Entity<RefreshToken>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PK__RefreshT__3214EC072C5383CD");
+
+            entity.ToTable("RefreshToken");
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(getutcdate())")
+                .HasColumnType("datetime");
+            entity.Property(e => e.ExpiresAt).HasColumnType("datetime");
+            entity.Property(e => e.Token)
+                .IsRequired()
+                .HasMaxLength(255);
+
+            entity.HasOne(d => d.User).WithMany(p => p.RefreshTokens)
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.ClientSetNull)
+                .HasConstraintName("FK_RefreshToken_User");
         });
 
         modelBuilder.Entity<Slide>(entity =>

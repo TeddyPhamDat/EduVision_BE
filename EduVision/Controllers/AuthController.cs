@@ -1,15 +1,19 @@
-using EduVision.DBContext;
+﻿using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
 using EduVision.Models.Entities.Enum;
 using EduVision.Services;
 using Google.Apis.Auth;
+using Google.Apis.Auth.OAuth2.Requests;
 using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.CognitiveServices.Speech.Transcription;
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json.Linq;
 using System;
+using static System.Net.WebRequestMethods;
 using LoginRequest = EduVision.Models.DTO.Request.LoginRequest;
 using RegisterRequest = EduVision.Models.DTO.Request.RegisterRequest;
 
@@ -21,7 +25,7 @@ using RegisterRequest = EduVision.Models.DTO.Request.RegisterRequest;
 [Route("api/authentication")]
 public class AuthController : ControllerBase
 {
-    private readonly JwtService _jwtService;
+    private readonly IJwtService _jwtService;
     private readonly EduVisionContext _context;
     private readonly IEmailSender _emailSender;
 
@@ -34,6 +38,8 @@ public class AuthController : ControllerBase
 
     /// <summary>
     /// Authenticate user and return JWT token.
+    /// <summary>
+    /// Authenticate user and return JWT access + refresh token.
     /// </summary>
     [HttpPost("sessions")]
     public IActionResult CreateSession([FromBody] LoginRequest request)
@@ -43,11 +49,42 @@ public class AuthController : ControllerBase
         if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.Password))
             return Unauthorized(ApiResponse<object>.Fail("Invalid username or password", 401));
 
-        var token = _jwtService.GenerateToken(user);
+        // Tạo access token + refresh token
+        var tokens = _jwtService.GenerateTokens(user);
 
+        // Kiểm tra refresh token đã tồn tại chưa
+        var existingRefresh = _context.RefreshTokens.FirstOrDefault(rt => rt.UserId == user.UserId);
+
+        if (existingRefresh != null)
+        {
+            // Cập nhật lại token và thời gian
+            existingRefresh.Token = tokens.RefreshToken;
+            existingRefresh.ExpiresAt = DateTime.UtcNow.AddDays(7);
+            existingRefresh.IsRevoked = false;
+            existingRefresh.CreatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            // Chưa có thì thêm mới
+            var newRefresh = new RefreshToken
+            {
+                UserId = user.UserId,
+                Token = tokens.RefreshToken,
+                ExpiresAt = DateTime.UtcNow.AddDays(7),
+                IsRevoked = false
+            };
+            _context.RefreshTokens.Add(newRefresh);
+        }
+
+        _context.SaveChanges();
+
+        // Trả về response
         var response = new LoginResponse
         {
-            Token = token,
+            Token = tokens.AccessToken,
+            RefreshToken = tokens.RefreshToken,
+            TokenExpiresAt = tokens.AccessTokenExpireAt,
+            RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(7), // cùng lúc với ExpiresAt
             Username = user.UserName,
             FullName = user.FullName,
             Email = user.Email,
@@ -56,6 +93,54 @@ public class AuthController : ControllerBase
 
         return Ok(ApiResponse<LoginResponse>.Success(response));
     }
+
+
+    /// <summary>
+    /// Refresh access token using a valid refresh token.
+    /// </summary>
+    [HttpPost("refresh-token")]
+    public IActionResult RefreshToken([FromBody] EduVision.Models.DTO.Request.TokenRequest request)
+    {
+        var existingToken = _context.RefreshTokens
+            .FirstOrDefault(rt => rt.Token == request.RefreshToken && !rt.IsRevoked);
+
+        if (existingToken == null || existingToken.ExpiresAt < DateTime.UtcNow)
+        {
+            return Unauthorized(ApiResponse<object>.Fail("Invalid or expired refresh token", 401));
+        }
+
+        var user = _context.Users.FirstOrDefault(u => u.UserId == existingToken.UserId);
+        if (user == null)
+        {
+            return Unauthorized(ApiResponse<object>.Fail("User not found", 401));
+        }
+
+        // Tạo access token mới + refresh token mới
+        var tokens = _jwtService.GenerateTokens(user);
+
+        // Cập nhật refresh token hiện tại
+        existingToken.Token = tokens.RefreshToken;
+        existingToken.ExpiresAt = DateTime.UtcNow.AddDays(7);
+        existingToken.CreatedAt = DateTime.UtcNow;
+
+        _context.SaveChanges();
+
+        var response = new LoginResponse
+        {
+            Token = tokens.AccessToken,
+            RefreshToken = tokens.RefreshToken,
+            TokenExpiresAt = tokens.AccessTokenExpireAt,
+            RefreshTokenExpiresAt = existingToken.ExpiresAt,
+            Username = user.UserName,
+            FullName = user.FullName,
+            Email = user.Email,
+            Role = ((Role)user.Role).ToString()
+        };
+
+        return Ok(ApiResponse<LoginResponse>.Success(response));
+    }
+
+
 
     /// <summary>
     /// Initiate registration and send OTP to email.
@@ -100,7 +185,7 @@ public class AuthController : ControllerBase
         }
 
         // Create a new user and send OTP for verification.
-        var newUser = new User
+        var newUser = new EduVision.Models.User
         {
             Email = request.Email,
             Role = (int)Role.USER,
@@ -126,7 +211,7 @@ public class AuthController : ControllerBase
     /// <summary>
     /// Complete registration by verifying OTP and setting password.
     /// </summary>
-    [HttpPost("registrations/complete")]
+    [HttpPost("registrations/complete")] 
     public async Task<IActionResult> CompleteRegistration([FromBody] CompleteRegistrationRequest request)
     {
         if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.OtpToken)
@@ -182,6 +267,9 @@ public class AuthController : ControllerBase
         var response = new LoginResponse
         {
             Token = "",
+            RefreshToken = "",
+            TokenExpiresAt = null,
+            RefreshTokenExpiresAt = null,
             Username = user.UserName,
             FullName = user.FullName,
             Email = user.Email,
@@ -223,7 +311,7 @@ public class AuthController : ControllerBase
         else
         {
             // Register new user from Google account.
-            user = new User
+            user = new EduVision.Models.User
             {
                 Email = email,
                 UserName = payload.Email,
@@ -250,10 +338,138 @@ public class AuthController : ControllerBase
             await _context.SaveChangesAsync();
         }
 
-        var token = _jwtService.GenerateToken(user);
+        var tokens = _jwtService.GenerateTokens(user);
 
-        return Ok(ApiResponse<string>.Success(token, "Sign in successfully with Google"));
+        var response = new LoginResponse
+        {
+            Token = tokens.AccessToken,
+            RefreshToken = tokens.RefreshToken,
+            TokenExpiresAt = null,
+            RefreshTokenExpiresAt = null,
+            Username = user.UserName,
+            FullName = user.FullName,
+            Email = user.Email,
+            Role = ((Role)user.Role).ToString()
+        };
+
+        return Ok(ApiResponse<LoginResponse>.Success(response, "Sign in successfully with Google"));
     }
+
+    /// <summary>
+    /// Initiates forgot password process: sends OTP to the user's email.
+    /// </summary>
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] EduVision.Models.DTO.Request.ForgotPasswordRequest request)
+    {
+        if (string.IsNullOrEmpty(request.Email))
+            return BadRequest(ApiResponse<string>.Fail("Email is required", 400));
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+        /// Fix for CS0019: Operator '||' cannot be applied to operands of type 'bool' and 'bool?'
+        /// Updated the code to explicitly compare nullable bool with true.
+
+        if (user == null || user.IsVerified != true)
+            return BadRequest(ApiResponse<string>.Fail("Email is not registered or verified", 400));
+
+        var otp = new OtpToken
+        {
+            Email = user.Email,
+            Token = GenerateOtpToken(), // Random 6-digit code
+            CreatedAt = DateTime.UtcNow,
+            Used = false
+        };
+
+        _context.OtpTokens.Add(otp);
+        await _context.SaveChangesAsync();
+
+        // Gửi email chứa mã OTP ở đây (tùy tích hợp)
+        await _emailSender.SendEmailAsync(user.Email, "EduVision Password Reset OTP", $"Your OTP code is: {otp.Token}");
+
+        return Ok(ApiResponse<string>.Success("", "OTP has been sent to your email"));
+    }
+
+    /// <summary>
+    /// Resets the password after verifying OTP.
+    /// </summary>
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] EduVision.Models.DTO.Request.ResetPasswordRequest request)
+    {
+        if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.OtpToken) || string.IsNullOrEmpty(request.NewPassword))
+            return BadRequest(ApiResponse<string>.Fail("Email, OTP, and New Password are required", 400));
+
+        var otp = await _context.OtpTokens
+            .Where(o => o.Email == request.Email && o.Token == request.OtpToken && o.Used == false)
+            .OrderByDescending(o => o.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (otp == null || (DateTime.UtcNow - otp.CreatedAt.Value).TotalMinutes > 5)
+            return BadRequest(ApiResponse<string>.Fail("Invalid or expired OTP", 400));
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+        if (user == null)
+            return BadRequest(ApiResponse<string>.Fail("User not found", 400));
+
+        // Cập nhật mật khẩu
+        user.Password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+        otp.Used = true;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(ApiResponse<string>.Success("Password has been reset successfully"));
+    }
+
+
+    /// <summary>
+    /// Log out of the current instance by revoking the Refresh Token.
+    /// </summary>
+    [HttpPost("logout")]
+    public IActionResult Logout([FromBody] EduVision.Models.DTO.Request.RefreshTokenRequest request)
+    {
+        var token = _context.RefreshTokens.FirstOrDefault(rt => rt.Token == request.RefreshToken);
+        if (token == null)
+        {
+            return NotFound(ApiResponse<object>.Fail("Token not found", 404));
+        }
+
+        token.IsRevoked = true;
+        _context.SaveChanges();
+
+        return Ok(ApiResponse<object>.Success("Logged out successfully"));
+    }
+
+    /// <summary>
+    /// Log out of all devices by revoking all user Refresh Tokens.
+    /// </summary>
+    [HttpPost("logout-all")]
+    public IActionResult LogoutAll()
+    {
+        var userId = GetUserIdFromAccessToken(); // lấy từ ClaimsPrincipal
+
+        var userTokens = _context.RefreshTokens
+            .Where(rt => rt.UserId == userId && !rt.IsRevoked)
+            .ToList();
+
+        foreach (var token in userTokens)
+        {
+
+            token.IsRevoked = true;
+        }
+
+        _context.SaveChanges();
+
+        return Ok(ApiResponse<object>.Success("All sessions logged out"));
+    }
+
+    private int GetUserIdFromAccessToken()
+    {
+        var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == "userId");
+        foreach (var claim in User.Claims)
+        {
+            Console.WriteLine($"{claim.Type}: {claim.Value}");
+        }
+        return int.Parse(userIdClaim?.Value ?? "0");
+    }
+
 
     /// <summary>
     /// Generates a 6-digit OTP code for email verification.
