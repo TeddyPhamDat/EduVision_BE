@@ -21,42 +21,6 @@ using Xabe.FFmpeg;
 var builder = WebApplication.CreateBuilder(args);
 
 // Set the FFmpeg executables path so that video/audio processing features can find the required binaries.
-// This is essential for any functionality that relies on FFmpeg, such as video generation.
-var ffmpegPath = builder.Configuration["FFmpeg:ExecutablesPath"];
-if (!string.IsNullOrEmpty(ffmpegPath))
-{
-    // Convert a relative path to an absolute one, which is necessary for cloud deployments (e.g., Azure).
-    if (!Path.IsPathRooted(ffmpegPath))
-    {
-        ffmpegPath = Path.Combine(Directory.GetCurrentDirectory(), ffmpegPath);
-    }
-    FFmpeg.SetExecutablesPath(ffmpegPath);
-}
-
-// In production, ensure the FFmpeg binary has execute permissions (especially on Linux).
-// This is required because deployment processes may strip execute permissions, causing FFmpeg to fail at runtime.
-if (!builder.Environment.IsDevelopment())
-{
-    var ffmpegBinary = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "ffmpeg", "ffmpeg");
-    if (File.Exists(ffmpegBinary))
-    {
-        try
-        {
-            var processInfo = new ProcessStartInfo("chmod", $"+x {ffmpegBinary}")
-            {
-                CreateNoWindow = true,
-                UseShellExecute = false
-            };
-            using var process = Process.Start(processInfo);
-            process?.WaitForExit();
-        }
-        catch (Exception ex)
-        {
-            // Log the error but do not prevent the application from starting.
-            Console.WriteLine($"Warning: Could not set execute permissions for FFmpeg: {ex.Message}");
-        }
-    }
-}
 
 // Register all required services for the application, including controllers, Swagger, authentication, and custom services.
 builder.Services.AddControllers();
@@ -120,6 +84,9 @@ builder.Services.AddSingleton<KafkaProducerService>();
 // Register Kafka consumer service for processing slide generation requests.
 builder.Services.AddHostedService<SlideGenerationConsumer>();
 
+// Register Kafka consumer service for processing video results
+builder.Services.AddHostedService<VideoResultConsumer>();
+
 // Register MongoDB configuration and service for accessing educational content.
 builder.Services.AddOptions<MongoDbConfig>()
     .Bind(builder.Configuration.GetSection("MongoDB"))
@@ -161,10 +128,7 @@ builder.Services.AddScoped<RevealJsGenerator>();
 builder.Services.AddSingleton<AzureBlobStorageService>();
 builder.Services.AddScoped<IImageStorageService, AzureBlobImageStorage>();
 builder.Services.AddScoped<SlideCaptureService>();
-builder.Services.AddScoped<IVideoSegmentCreator, FfmpegSegmentCreator>();
-builder.Services.AddScoped<IVideoConcatenator, FfmpegVideoConcatenator>();
 builder.Services.AddScoped<IVideoStorageService, AzureBlobVideoStorage>();
-builder.Services.AddScoped<VideoGenerationService>();
 
 // Register configuration for screenshot API integration.
 builder.Services.Configure<ScreenshotApiConfig>(

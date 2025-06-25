@@ -7,6 +7,7 @@ using EduVision.Models.Entities.Enum;
 using EduVision.Services.AI;
 using EduVision.Services.Data;
 using EduVision.Services.Media;
+using EduVision.Services.Messaging;
 using EduVision.Services.Presentation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,44 +26,28 @@ namespace EduVision.Controllers
     {
         // Dependencies are injected to follow the Dependency Injection principle.
         // This makes the controller easier to test and maintain, and allows for flexible service replacement.
-        private readonly IGeminiService _geminiService;
-        private readonly RevealJsGenerator _revealJsGenerator;
-        private readonly TextToSpeechService _ttsService;
-        private readonly SlideCaptureService _slideCaptureService;
-        private readonly VideoGenerationService _videoGenerationService;
+
         private readonly IMongoDbService _mongoDbService;
         private readonly EduVisionContext _dbContext;
         private readonly ILogger<EducationController> _logger;
         private readonly IQuotaService _quotaService;
         private readonly KafkaProducerService _kafkaProducerService;
-        private readonly SlideImageSelectorService _slideImageSelectorService;
 
         // Constructor injects all required services for lesson generation, storage, and quota management.
         // This ensures all business logic is handled by dedicated services, keeping the controller thin.
         public EducationController(
-            IGeminiService geminiService,
-            RevealJsGenerator revealJsGenerator,
-            TextToSpeechService ttsService,
-            SlideCaptureService slideCaptureService,
-            VideoGenerationService videoGenerationService,
             IMongoDbService mongoDbService,
             EduVisionContext dbContext,
             ILogger<EducationController> logger,
             IQuotaService quotaService,
-            KafkaProducerService kafkaProducerService,
-            SlideImageSelectorService slideImageSelectorService)
+            KafkaProducerService kafkaProducerService)
         {
-            _geminiService = geminiService;
-            _revealJsGenerator = revealJsGenerator;
-            _ttsService = ttsService;
-            _slideCaptureService = slideCaptureService;
-            _videoGenerationService = videoGenerationService;
+
             _mongoDbService = mongoDbService;
             _dbContext = dbContext;
             _logger = logger;
             _quotaService = quotaService;
             _kafkaProducerService = kafkaProducerService;
-            _slideImageSelectorService = slideImageSelectorService;
         }
 
         /// <summary>
@@ -168,19 +153,19 @@ namespace EduVision.Controllers
         /// Generate a full video lesson (with audio).
         /// </summary>
         // Why: This endpoint is for users who want a complete multimedia lesson, including narration and video composition.
-        [Authorize(Roles = "USER")]
+        [Authorize(Roles = "USER,MANAGER,ADMIN")]
         [HttpPost("videos")]
-        [ProducesResponseType(typeof(SlideGenerationResultDto), 200)]
-        public async Task<ActionResult<SlideGenerationResultDto>> CreateVideoLesson([FromBody] EducationRequestDto request)
+        [ProducesResponseType(typeof(ApiResponse<int>), 202)]
+        public async Task<ActionResult> CreateVideoLesson([FromBody] EducationRequestDto request)
         {
-            // Extract user ID from JWT claims for quota and ownership checks.
+            // Extract user ID from JWT claims for quota and ownership checks
             var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
             {
                 return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
             }
 
-            // Enforce video quota for non-manager users to prevent abuse and manage system resources.
+            // Enforce video quota for non-manager users
             var user = await _dbContext.Users.FindAsync(userId);
             if (user == null)
                 return BadRequest(ApiResponse<string>.Fail("User does not exist", 404));
@@ -191,169 +176,70 @@ namespace EduVision.Controllers
                     return BadRequest(ApiResponse<string>.Fail("You have exceeded the number of video generations for the month", 400));
             }
 
-            // Validate required parameters to ensure the request is meaningful.
+            // Validate required parameters
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
                 return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
 
-            var totalSw = Stopwatch.StartNew();
             _logger.LogInformation("Starting video lesson generation for subject: {Subject}, chapter: {Chapter}, grade: {Grade}",
                 request.Subject, request.Chapter, request.Grade);
 
             try
             {
-                // Use a default image category if not specified to ensure every slide has an image.
-                string imageCategory = string.IsNullOrEmpty(request.ImageCategory) ? "education" : request.ImageCategory;
-                var sw = Stopwatch.StartNew();
-
-                // Generate slide content using Gemini AI service.
-                var slideResult = await _geminiService.GenerateEducationSlidesAsync(request.Subject, request.Chapter, request.Grade);
-
-                if (slideResult == null || slideResult.HttpStatusCode != 200)
+                // Create database entry with "Processing" status
+                var promptEntity = new Prompt
                 {
-                    return StatusCode(
-                        slideResult?.HttpStatusCode ?? 500,
-                        ApiResponse<string>.Fail(slideResult?.ErrorMessage ?? "Failed to generate slides", slideResult?.HttpStatusCode ?? 500)
-                    );
-                }
+                    UserId = userId,
+                    Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - video",
+                    CreatedAt = DateTime.UtcNow,
+                    Status = "Processing" // Important: Mark as processing until video is completed
+                };
+                _dbContext.Prompts.Add(promptEntity);
+                await _dbContext.SaveChangesAsync();
 
-                var slides = slideResult.Slides;
-                if (slides == null || slides.Count == 0)
-                    return BadRequest(ApiResponse<string>.Fail("No slides generated", 400));
-
-                // Assign images to each slide to enhance engagement and educational value.
-                var imageUrls = await _slideImageSelectorService.GetBestImagesForSlidesAsync(imageCategory, request.Grade, request.Chapter, slides.Count);
-                if (imageUrls == null || imageUrls.All(string.IsNullOrEmpty))
-                    return BadRequest(ApiResponse<string>.Fail($"No images found for category '{imageCategory}'", 400));
-
-                for (int i = 0; i < slides.Count; i++)
-                    slides[i].ImageUrl = imageUrls[i];
-
-                sw.Stop();
-                _logger.LogInformation("Image fetch and assignment: {Elapsed} ms", sw.ElapsedMilliseconds);
-
-                // Generate a unique lesson ID for storage and retrieval.
-                var lessonId = Guid.NewGuid().ToString("N");
-                string slideUrl;
-                try
+                // Create initial slide entries with "Processing" status
+                var slideEntity = new Slide
                 {
-                    sw.Restart();
-                    // Select the appropriate Reveal.js template based on user preference.
-                    int template = request.Template;
-                    string templateName = template switch
-                    {
-                        2 => "RevealTemplateDark.html",
-                        3 => "RevealTemplateModern.html",
-                        1 => "RevealTemplate.html",
-                        _ => "RevealTemplateDark.html"
-                    };
-                    // Generate the HTML presentation and upload it to storage.
-                    slideUrl = await _revealJsGenerator.GenerateRevealHtmlAsync(slides, lessonId, templateName);
-                    sw.Stop();
-                    _logger.LogInformation("Reveal.js HTML generation: {Elapsed} ms", sw.ElapsedMilliseconds);
-                }
-                catch (Exception ex)
+                    PromptId = promptEntity.Promptid,
+                    UserId = userId,
+                    Type = request.Subject,
+                    Status = "Processing"
+                };
+                _dbContext.Slides.Add(slideEntity);
+                await _dbContext.SaveChangesAsync();
+
+                // Create initial video entry with "Processing" status
+                var videoEntity = new GeneratedVideo
                 {
-                    return StatusCode(500, ApiResponse<string>.Fail("Failed to generate presentation: " + ex.Message, 500));
-                }
+                    PromptId = promptEntity.Promptid,
+                    SlideId = slideEntity.SlideId,
+                    Status = "Processing",
+                    CreatedAt = DateTime.UtcNow
+                };
+                _dbContext.GeneratedVideos.Add(videoEntity);
+                await _dbContext.SaveChangesAsync();
 
-                // Generate audio narration for each slide using TTS.
-                await AssignAudioToSlidesAsync(slides, lessonId);
+                // Increment quota - we charge upfront to prevent abuse
+                await _quotaService.IncrementQuotaUsedAsync(userId, "video");
 
-                // Capture slide images for video composition.
-                sw.Restart();
-                var capturedImageUrls = await _slideCaptureService.CaptureSlidesAsync(slideUrl, slides.Count, lessonId);
-                sw.Stop();
-                _logger.LogInformation("Slide image capture: {Elapsed} ms", sw.ElapsedMilliseconds);
-
-                for (int i = 0; i < slides.Count; i++)
-                    slides[i].CapturedImageUrl = capturedImageUrls[i];
-
-                // Generate the final video by combining images and audio.
-                sw.Restart();
-                var videoUrl = await _videoGenerationService.GenerateVideoAsync(slides, lessonId);
-                sw.Stop();
-                _logger.LogInformation("Video generation: {Elapsed} ms", sw.ElapsedMilliseconds);
-
-                // Save all generated assets and metadata to the database for tracking and future access.
-                using (var transaction = await _dbContext.Database.BeginTransactionAsync())
+                // Enqueue the slide generation job with video flag set to true
+                await _kafkaProducerService.ProduceAsync(new SlideGenerationKafkaMessage
                 {
-                    try
-                    {
-                        var promptEntity = new Prompt
-                        {
-                            UserId = userId,
-                            Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - video",
-                            CreatedAt = DateTime.UtcNow,
-                            Status = "Completed"
-                        };
-                        _dbContext.Prompts.Add(promptEntity);
-                        await _dbContext.SaveChangesAsync();
+                    UserId = userId,
+                    Request = request,
+                    GenerateVideo = true  // Signal that video should be generated after slides
+                });
 
-                        var slideEntities = slides.Select((slide, i) => new Slide
-                        {
-                            PromptId = promptEntity.Promptid,
-                            UserId = userId,
-                            Type = request.Subject,
-                            Url = slide.CapturedImageUrl ?? slide.ImageUrl ?? "",
-                            Status = "Completed"
-                        }).ToList();
-
-                        _dbContext.Slides.AddRange(slideEntities);
-                        await _dbContext.SaveChangesAsync();
-
-                        var videoEntity = new GeneratedVideo
-                        {
-                            PromptId = promptEntity.Promptid,
-                            SlideId = slideEntities.FirstOrDefault()?.SlideId,
-                            Status = "Completed",
-                            CreatedAt = DateTime.UtcNow,
-                            VideoUrl = videoUrl
-                        };
-                        _dbContext.GeneratedVideos.Add(videoEntity);
-                        await _dbContext.SaveChangesAsync();
-
-                        await transaction.CommitAsync();
-                        await _quotaService.CheckQuotaAsync(userId, "video");
-                        await _quotaService.IncrementQuotaUsedAsync(userId, "video");
-                    }
-                    catch (Exception ex)
-                    {
-                        await transaction.RollbackAsync();
-                        _logger.LogError(ex, "Database error while saving video lesson");
-                        return StatusCode(500, ApiResponse<string>.Fail("Failed to save lesson data: " + ex.Message, 500));
-                    }
-                }
-
-                totalSw.Stop();
-                _logger.LogInformation("Total request time: {Elapsed} ms", totalSw.ElapsedMilliseconds);
-
-                // Return the result to the client.
-                return Ok(ApiResponse<SlideGenerationResultDto>.Success(new SlideGenerationResultDto
-                {
-                    Subject = request.Subject,
-                    Chapter = request.Chapter,
-                    Grade = request.Grade,
-                    SlideUrl = slideUrl,
-                    VideoUrl = videoUrl,
-                }));
+                // Return 202 Accepted with a tracking ID
+                return Accepted(ApiResponse<int>.Success(
+                    promptEntity.Promptid, 
+                    "Video generation request accepted and is being processed. Use the returned ID to check the status."));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error generating video lesson");
-                return StatusCode(500, ApiResponse<string>.Fail("Failed to generate video lesson: " + ex.Message, 500));
+                _logger.LogError(ex, "Error initiating video generation");
+                return StatusCode(500, ApiResponse<string>.Fail($"Failed to start video generation: {ex.Message}", 500));
             }
         }
 
-        // Generate audio for each slide using TTS.
-        // Why: Audio is required for video lessons to provide narration for each slide.
-        private async Task AssignAudioToSlidesAsync(List<LessonSlideDto> slides, string lessonId)
-        {
-            var audioTasks = slides.Select((slide, i) => Task.Run(async () =>
-            {
-                var audioBlobName = $"presentations/{lessonId}/audio/{i}.wav";
-                slide.AudioUrl = await _ttsService.GenerateAudioAsync(slide.Content ?? string.Empty, audioBlobName);
-            }));
-            await Task.WhenAll(audioTasks);
-        }
     }
 }

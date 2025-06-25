@@ -1,10 +1,13 @@
 using Confluent.Kafka;
+using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.Config;
 using EduVision.Models.DTO.Request;
 using EduVision.Services.AI;
 using EduVision.Services.Data;
+using EduVision.Services.Media;
 using EduVision.Services.Presentation;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 
@@ -160,12 +163,15 @@ namespace EduVision.Services.Messaging
             var quotaService = scope.ServiceProvider.GetRequiredService<IQuotaService>();
             var logger = scope.ServiceProvider.GetRequiredService<ILogger<SlideGenerationConsumer>>();
             var slideImageSelector = scope.ServiceProvider.GetRequiredService<SlideImageSelectorService>();
+            var kafkaProducer = scope.ServiceProvider.GetRequiredService<KafkaProducerService>();
+            var ttsService = scope.ServiceProvider.GetRequiredService<TextToSpeechService>();
 
             var userId = message.UserId;
             var request = message.Request;
+            var generateVideo = message.GenerateVideo;
 
-            logger.LogInformation("Processing slide generation for UserId: {UserId}, Subject: {Subject}, Chapter: {Chapter}",
-                userId, request.Subject, request.Chapter);
+            logger.LogInformation("Processing slide generation for UserId: {UserId}, Subject: {Subject}, Chapter: {Chapter}, GenerateVideo: {GenerateVideo}",
+                userId, request.Subject, request.Chapter, generateVideo);
 
             try
             {
@@ -175,6 +181,12 @@ namespace EduVision.Services.Messaging
                 if (slideResult == null || slideResult.HttpStatusCode != 200 || slideResult.Slides == null || slideResult.Slides.Count == 0)
                 {
                     logger.LogError("Failed to generate slides for UserId: {UserId}, Reason: {Reason}", userId, slideResult?.ErrorMessage);
+                    
+                    if (generateVideo)
+                    {
+                        await UpdateFailedStatus(dbContext, userId, request, "Failed to generate slides");
+                    }
+                    
                     return;
                 }
 
@@ -190,6 +202,12 @@ namespace EduVision.Services.Messaging
                 if (imageUrls == null || imageUrls.Count < slideResult.Slides.Count)
                 {
                     logger.LogError("Not enough images found for category '{Category}'", imageCategory);
+                    
+                    if (generateVideo)
+                    {
+                        await UpdateFailedStatus(dbContext, userId, request, "Not enough images found");
+                    }
+                    
                     return;
                 }
 
@@ -205,32 +223,96 @@ namespace EduVision.Services.Messaging
                     1 => "RevealTemplate.html",
                     _ => "RevealTemplateDark.html"
                 };
+                
                 var slideUrl = await revealJsGenerator.GenerateRevealHtmlAsync(slideResult.Slides, lessonId, templateName);
 
                 // Save to DB
+                int promptId = 0;
                 using var transaction = await dbContext.Database.BeginTransactionAsync();
                 try
                 {
-                    var promptEntity = new Prompt
+                    if (generateVideo)
                     {
-                        UserId = userId,
-                        Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - slides",
-                        CreatedAt = DateTime.UtcNow,
-                        Status = "Completed"
-                    };
-                    dbContext.Prompts.Add(promptEntity);
-                    await dbContext.SaveChangesAsync();
+                        // For video generation, find the existing "Processing" prompt
+                        var prompt = await dbContext.Prompts
+                            .Where(p => p.UserId == userId && p.Status == "Processing")
+                            .OrderByDescending(p => p.CreatedAt)
+                            .FirstOrDefaultAsync();
 
-                    var slideEntity = new Slide
+                        if (prompt != null)
+                        {
+                            promptId = prompt.Promptid;
+                            
+                            // Update the existing slide with the URL
+                            var slide = await dbContext.Slides
+                                .Where(s => s.PromptId == prompt.Promptid)
+                                .FirstOrDefaultAsync();
+                                
+                            if (slide != null)
+                            {
+                                slide.Url = slideUrl ?? "";
+                                await dbContext.SaveChangesAsync();
+                            }
+                        }
+                        else
+                        {
+                            // No prompt found, create a new one
+                            logger.LogWarning("No processing prompt found for video generation. Creating a new one.");
+                            
+                            var promptEntity = new Prompt
+                            {
+                                UserId = userId,
+                                Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - video",
+                                CreatedAt = DateTime.UtcNow,
+                                Status = "Processing"
+                            };
+                            dbContext.Prompts.Add(promptEntity);
+                            await dbContext.SaveChangesAsync();
+                            
+                            promptId = promptEntity.Promptid;
+                            
+                            var slideEntity = new Slide
+                            {
+                                PromptId = promptEntity.Promptid,
+                                UserId = userId,
+                                Type = request.Subject,
+                                Url = slideUrl ?? "",
+                                Status = "Processing"
+                            };
+                            dbContext.Slides.Add(slideEntity);
+                            await dbContext.SaveChangesAsync();
+                        }
+                    }
+                    else
                     {
-                        PromptId = promptEntity.Promptid,
-                        UserId = userId,
-                        Type = request.Subject,
-                        Url = slideUrl ?? "",
-                        Status = "Completed"
-                    };
-                    dbContext.Slides.Add(slideEntity);
-                    await dbContext.SaveChangesAsync();
+                        // For slide-only generation
+                        var promptEntity = new Prompt
+                        {
+                            UserId = userId,
+                            Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - slides",
+                            CreatedAt = DateTime.UtcNow,
+                            Status = "Completed"
+                        };
+                        dbContext.Prompts.Add(promptEntity);
+                        await dbContext.SaveChangesAsync();
+                        
+                        promptId = promptEntity.Promptid;
+
+                        var slideEntity = new Slide
+                        {
+                            PromptId = promptEntity.Promptid,
+                            UserId = userId,
+                            Type = request.Subject,
+                            Url = slideUrl ?? "",
+                            Status = "Completed"
+                        };
+                        dbContext.Slides.Add(slideEntity);
+                        await dbContext.SaveChangesAsync();
+                        
+                        // Increment quota for slide-only generation
+                        try { await quotaService.IncrementQuotaUsedAsync(userId, "slides"); }
+                        catch (Exception quotaEx) { logger.LogError(quotaEx, "Failed to update quota usage after saving slides"); }
+                    }
 
                     await transaction.CommitAsync();
                 }
@@ -241,15 +323,96 @@ namespace EduVision.Services.Messaging
                     return;
                 }
 
-                // Increment quota
-                try { await quotaService.IncrementQuotaUsedAsync(userId, "slides"); }
-                catch (Exception quotaEx) { logger.LogError(quotaEx, "Failed to update quota usage after saving slides"); }
+                // If video generation is requested, prepare audio and send to video consumer
+                if (generateVideo)
+                {
+                    try
+                    {
+                        // Generate audio narration for each slide
+                        foreach (var slide in slideResult.Slides)
+                        {
+                            var audioBlobName = $"presentations/{lessonId}/audio/{slideResult.Slides.IndexOf(slide)}.wav";
+                            slide.AudioUrl = await ttsService.GenerateAudioAsync(slide.Content ?? string.Empty, audioBlobName);
+                        }
 
-                logger.LogInformation("Slide generation completed for UserId: {UserId}", userId);
+                        // Send to video generation service
+                        await kafkaProducer.ProduceAsync(
+                            new VideoGenerationKafkaMessage
+                            {
+                                UserId = userId,
+                                PromptId = promptId,
+                                LessonId = lessonId,
+                                SlideUrl = slideUrl,
+                                Slides = slideResult.Slides
+                            },
+                            _kafkaConfig.VideoGenerationTopic);
+
+                        logger.LogInformation("Sent slides to video generation service for UserId: {UserId}, LessonId: {LessonId}",
+                            userId, lessonId);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Failed to prepare or send video generation request for UserId: {UserId}", userId);
+                        
+                        // Update status to failed
+                        await UpdateFailedStatus(dbContext, userId, request, $"Failed to initiate video processing: {ex.Message}");
+                    }
+                }
+
+                logger.LogInformation("Slide generation completed for UserId: {UserId}, GenerateVideo: {GenerateVideo}", 
+                    userId, generateVideo);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Error processing slide generation for UserId: {UserId}", userId);
+                
+                if (generateVideo)
+                {
+                    await UpdateFailedStatus(dbContext, userId, request, $"Error: {ex.Message}");
+                }
+            }
+        }
+
+        private async Task UpdateFailedStatus(EduVisionContext dbContext, int userId, EducationRequestDto request, string errorMessage)
+        {
+            try
+            {
+                // Find the latest processing prompt
+                var prompt = await dbContext.Prompts
+                    .Where(p => p.UserId == userId && p.Status == "Processing")
+                    .OrderByDescending(p => p.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (prompt != null)
+                {
+                    prompt.Status = "Failed";
+                    
+                    // Find related slides and update their status
+                    var slides = await dbContext.Slides
+                        .Where(s => s.PromptId == prompt.Promptid)
+                        .ToListAsync();
+                        
+                    foreach (var slide in slides)
+                    {
+                        slide.Status = "Failed";
+                    }
+                    
+                    // Find related video and update its status
+                    var video = await dbContext.GeneratedVideos
+                        .Where(v => v.PromptId == prompt.Promptid)
+                        .FirstOrDefaultAsync();
+                        
+                    if (video != null)
+                    {
+                        video.Status = "Failed";
+                    }
+                    
+                    await dbContext.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to update status to Failed for UserId: {UserId}", userId);
             }
         }
     }

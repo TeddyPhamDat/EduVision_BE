@@ -3,29 +3,53 @@ using EduVision.Models.Config;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 
-public class KafkaProducerService
+namespace EduVision.Services.Messaging
 {
-    private readonly IProducer<Null, string> _producer;
-    private readonly string _topic;
-
-    public KafkaProducerService(IOptions<KafkaConfig> config)
+    public class KafkaProducerService
     {
-        var producerConfig = new ProducerConfig
+        private readonly IProducer<Null, string> _producer;
+        private readonly KafkaConfig _kafkaConfig;
+        private readonly ILogger<KafkaProducerService> _logger;
+
+        public KafkaProducerService(
+            IOptions<KafkaConfig> config,
+            ILogger<KafkaProducerService> logger)
         {
-            BootstrapServers = config.Value.BootstrapServers,
-            SecurityProtocol = SecurityProtocol.SaslSsl,
-            SaslMechanism = SaslMechanism.Plain,
-            SaslUsername = config.Value.SaslUsername,
-            SaslPassword = config.Value.SaslPassword
-        };
-        _producer = new ProducerBuilder<Null, string>(producerConfig).Build();
-        _topic = config.Value.SlideGenerationTopic;
-    }
+            _kafkaConfig = config.Value;
+            _logger = logger;
 
-    public async Task ProduceAsync<T>(T message)
-    {
-        var json = JsonSerializer.Serialize(message);
-        await _producer.ProduceAsync(_topic, new Message<Null, string> { Value = json });
+            var producerConfig = new ProducerConfig
+            {
+                BootstrapServers = _kafkaConfig.BootstrapServers,
+            };
+
+            if (!string.IsNullOrEmpty(_kafkaConfig.SaslUsername))
+            {
+                producerConfig.SecurityProtocol = SecurityProtocol.SaslSsl;
+                producerConfig.SaslMechanism = SaslMechanism.Plain;
+                producerConfig.SaslUsername = _kafkaConfig.SaslUsername;
+                producerConfig.SaslPassword = _kafkaConfig.SaslPassword;
+            }
+            
+            _producer = new ProducerBuilder<Null, string>(producerConfig).Build();
+        }
+
+        public async Task ProduceAsync<T>(T message, string? topic = null)
+        {
+            var targetTopic = topic ?? _kafkaConfig.SlideGenerationTopic; // Default if not specified
+            var json = JsonSerializer.Serialize(message);
+            
+            try 
+            {
+                _logger.LogInformation("Producing message to topic {Topic}", targetTopic);
+                await _producer.ProduceAsync(targetTopic, new Message<Null, string> { Value = json });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error producing message to topic {Topic}", targetTopic);
+                throw;
+            }
+        }
     }
 }
 

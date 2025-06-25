@@ -42,21 +42,6 @@
     <Content Update="Secrets\appsettings.Secrets.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
-    <Content Update="wwwroot\ffmpeg\ffmpeg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Update="wwwroot\ffmpeg\ffprobe">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Update="wwwroot\ffmpeg\GPLv3.txt">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Update="wwwroot\ffmpeg\qt-faststart">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Update="wwwroot\ffmpeg\readme.txt">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
   </ItemGroup>
 	<ItemGroup>
 		<Content Include="Template\**\*.*">
@@ -69,6 +54,7 @@
 	</ItemGroup>
 	<ItemGroup>
 	  <Folder Include="Secrets\" />
+	  <Folder Include="wwwroot\" />
 	</ItemGroup>
 
 </Project>

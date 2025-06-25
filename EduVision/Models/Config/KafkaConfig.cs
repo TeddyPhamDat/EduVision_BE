@@ -4,6 +4,8 @@
     {
         public string BootstrapServers { get; set; }
         public string SlideGenerationTopic { get; set; }
+        public string VideoGenerationTopic { get; set; }
+        public string VideoResultTopic { get; set; }
         public string SaslUsername { get; set; }
         public string SaslPassword { get; set; }
         public string SecurityProtocol { get; set; }
