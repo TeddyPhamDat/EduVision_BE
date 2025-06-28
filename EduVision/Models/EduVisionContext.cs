@@ -2,10 +2,9 @@
 #nullable disable
 using System;
 using System.Collections.Generic;
-using EduVision.Models;
 using Microsoft.EntityFrameworkCore;
 
-namespace EduVision.DBContext;
+namespace EduVision.Models;
 
 public partial class EduVisionContext : DbContext
 {
@@ -36,7 +35,9 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<UserQuotum> UserQuota { get; set; }
 
-   
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+#warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
+        => optionsBuilder.UseSqlServer("Data Source=TEDDY\\TEDDY;Initial Catalog=EduVision;User ID=sa;Password=12345;Encrypt=False");
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

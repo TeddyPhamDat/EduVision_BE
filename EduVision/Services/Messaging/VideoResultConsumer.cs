@@ -2,6 +2,7 @@
 using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.Config;
+using Microsoft.CognitiveServices.Speech.Transcription;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
@@ -147,7 +148,7 @@ namespace EduVision.Services.Messaging
             using var scope = _serviceProvider.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<EduVisionContext>();
             var logger = scope.ServiceProvider.GetRequiredService<ILogger<VideoResultConsumer>>();
-
+            var userId = message.UserId;
             try
             {
                 // Find related prompt
@@ -189,7 +190,14 @@ namespace EduVision.Services.Messaging
                     {
                         slide.Status = "Completed";
                     }
-                    
+
+                    // Send FCM notification
+                    var user = await dbContext.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+                    if (!string.IsNullOrEmpty(user?.FcmToken))
+                    {
+                        var fcmService = scope.ServiceProvider.GetRequiredService<FirebaseCloudMessagingService>();
+                        await fcmService.SendVideoGeneratedAsync(user.FcmToken, message.VideoUrl);
+                    }
                     logger.LogInformation("Video generation completed for PromptId: {PromptId}, URL: {VideoUrl}", 
                         message.PromptId, message.VideoUrl);
                 }

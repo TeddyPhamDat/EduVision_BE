@@ -6,6 +6,7 @@ using EduVision.Models.Entities.Enum;
 using EduVision.Services.Authentication;
 using Google.Apis.Auth;
 using Google.Apis.Auth.OAuth2.Requests;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +14,7 @@ using Microsoft.CognitiveServices.Speech.Transcription;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
 using System;
+using System.Security.Claims;
 using static System.Net.WebRequestMethods;
 using LoginRequest = EduVision.Models.DTO.Request.LoginRequest;
 using RegisterRequest = EduVision.Models.DTO.Request.RegisterRequest;
@@ -92,6 +94,37 @@ public class AuthController : ControllerBase
         };
 
         return Ok(ApiResponse<LoginResponse>.Success(response));
+    }
+    [Authorize]
+    [HttpPost("fcm-token")]
+    public async Task<IActionResult> UpdateFcmToken([FromBody] FcmTokenRequest request)
+    {
+        try
+        {
+            var email = User.FindFirst(ClaimTypes.NameIdentifier)?.Value; // Lấy email
+            if (string.IsNullOrEmpty(email))
+            {
+                return BadRequest("User email not found in token");
+            }
+
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == email); // Tìm user bằng email
+
+            if (user == null) return NotFound("User not found");
+
+            user.FcmToken = request.FcmToken;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "FCM token updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    public class FcmTokenRequest
+    {
+        public string FcmToken { get; set; }
     }
 
 

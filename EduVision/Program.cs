@@ -141,6 +141,9 @@ builder.Services.AddDbContext<EduVisionContext>(options =>
 // Register text-to-speech service for generating audio from text.
 builder.Services.AddScoped<TextToSpeechService>();
 
+// Register Firebase Cloud Messaging service for sending notifications.
+builder.Services.AddHttpClient<FirebaseCloudMessagingService>();
+
 // Configure JWT authentication for securing API endpoints.
 builder.Services.AddAuthentication("Bearer")
     .AddJwtBearer("Bearer", options =>

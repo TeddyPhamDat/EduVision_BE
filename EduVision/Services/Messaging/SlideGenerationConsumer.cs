@@ -359,6 +359,14 @@ namespace EduVision.Services.Messaging
                     }
                 }
 
+                // Send FCM notification
+                var user = await dbContext.Users.FirstOrDefaultAsync(u => u.UserId == userId);
+                if (!string.IsNullOrEmpty(user?.FcmToken))
+                {
+                    var fcmService = scope.ServiceProvider.GetRequiredService<FirebaseCloudMessagingService>();
+                    await fcmService.SendSlideGeneratedAsync(user.FcmToken, slideUrl);
+                }
+
                 logger.LogInformation("Slide generation completed for UserId: {UserId}, GenerateVideo: {GenerateVideo}", 
                     userId, generateVideo);
             }

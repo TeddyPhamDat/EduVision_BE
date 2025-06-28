@@ -25,6 +25,8 @@ public partial class User
 
     public int Role { get; set; }
 
+    public string FcmToken { get; set; }
+
     public virtual ICollection<OtpToken> OtpTokens { get; set; } = new List<OtpToken>();
 
     public virtual ICollection<Payment> Payments { get; set; } = new List<Payment>();
