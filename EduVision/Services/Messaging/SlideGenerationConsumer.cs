@@ -54,7 +54,7 @@ namespace EduVision.Services.Messaging
                     var config = new ConsumerConfig
                     {
                         BootstrapServers = _kafkaConfig.BootstrapServers,
-                        GroupId = "slide-generation-group",
+                        GroupId = "slide-generation-group-dev2",
                         AutoOffsetReset = AutoOffsetReset.Earliest,
                         EnableAutoCommit = true,
                         AutoCommitIntervalMs = 5000,

@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace EduVision.Services.Messaging
 {
@@ -12,14 +13,19 @@ namespace EduVision.Services.Messaging
         private readonly HttpClient _httpClient;
         private readonly string _projectId;
         private readonly GoogleCredential _googleCredential;
+        private readonly string _serviceAccountJson;
 
         public FirebaseCloudMessagingService(IConfiguration config, HttpClient httpClient)
         {
             _httpClient = httpClient;
             _projectId = config["Firebase:ProjectId"];
 
-            // Load service account credentials
-            _googleCredential = GoogleCredential.FromFile("firebase-service-account.json")
+            // Lấy service account từ cấu hình và serialize thành JSON string
+            var serviceAccountSection = config.GetSection("Firebase:ServiceAccount");
+            var serviceAccountObject = serviceAccountSection.Get<Dictionary<string, object>>();
+            _serviceAccountJson = JsonSerializer.Serialize(serviceAccountObject);
+            // Load service account credentials từ JSON
+            _googleCredential = GoogleCredential.FromJson(_serviceAccountJson)
                                 .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
         }
 
