@@ -129,6 +129,8 @@ builder.Services.AddSingleton<AzureBlobStorageService>();
 builder.Services.AddScoped<IImageStorageService, AzureBlobImageStorage>();
 builder.Services.AddScoped<SlideCaptureService>();
 builder.Services.AddScoped<IVideoStorageService, AzureBlobVideoStorage>();
+builder.Services.AddScoped<IUserService, UserService>();
+
 
 // Register configuration for screenshot API integration.
 builder.Services.Configure<ScreenshotApiConfig>(

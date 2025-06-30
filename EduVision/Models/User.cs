@@ -27,6 +27,14 @@ public partial class User
 
     public string FcmToken { get; set; }
 
+    public string PhoneNumber { get; set; }
+
+    public string AvatarUrl { get; set; }
+
+    public string Address { get; set; }
+
+    public virtual ICollection<Notification> Notifications { get; set; } = new List<Notification>();
+
     public virtual ICollection<OtpToken> OtpTokens { get; set; } = new List<OtpToken>();
 
     public virtual ICollection<Payment> Payments { get; set; } = new List<Payment>();

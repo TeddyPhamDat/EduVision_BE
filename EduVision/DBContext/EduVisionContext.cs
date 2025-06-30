@@ -22,6 +22,8 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<Image> Images { get; set; }
 
+    public virtual DbSet<Notification> Notifications { get; set; }
+
     public virtual DbSet<OtpToken> OtpTokens { get; set; }
 
     public virtual DbSet<Payment> Payments { get; set; }
@@ -36,7 +38,7 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<UserQuotum> UserQuota { get; set; }
 
-   
+  
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -90,6 +92,22 @@ public partial class EduVisionContext : DbContext
                 .HasMaxLength(50)
                 .HasColumnName("status");
             entity.Property(e => e.Url).HasColumnName("url");
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.HasKey(e => e.NotificationId).HasName("PK__Notifica__20CF2E1271000EF9");
+
+            entity.ToTable("Notification");
+
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime");
+            entity.Property(e => e.Message).IsRequired();
+
+            entity.HasOne(d => d.User).WithMany(p => p.Notifications)
+                .HasForeignKey(d => d.UserId)
+                .HasConstraintName("FK_Notification_User");
         });
 
         modelBuilder.Entity<OtpToken>(entity =>
@@ -219,6 +237,8 @@ public partial class EduVisionContext : DbContext
             entity.ToTable("User");
 
             entity.Property(e => e.UserId).HasColumnName("userID");
+            entity.Property(e => e.Address).HasMaxLength(255);
+            entity.Property(e => e.AvatarUrl).HasMaxLength(255);
             entity.Property(e => e.CreatedAt)
                 .HasColumnType("datetime")
                 .HasColumnName("created_at");
@@ -234,6 +254,7 @@ public partial class EduVisionContext : DbContext
             entity.Property(e => e.Password)
                 .HasMaxLength(255)
                 .HasColumnName("password");
+            entity.Property(e => e.PhoneNumber).HasMaxLength(20);
             entity.Property(e => e.Role).HasColumnName("role");
             entity.Property(e => e.UserName)
                 .HasMaxLength(255)

@@ -38,12 +38,11 @@ public class AuthController : ControllerBase
         _emailSender = emailSender;
     }
 
-    /// <summary>
-    /// Authenticate user and return JWT token.
+
     /// <summary>
     /// Authenticate user and return JWT access + refresh token.
     /// </summary>
-    [HttpPost("sessions")]
+    [HttpPost("login")]
     public IActionResult CreateSession([FromBody] LoginRequest request)
     {
         var user = _context.Users.FirstOrDefault(u => u.UserName == request.Username);
@@ -95,6 +94,10 @@ public class AuthController : ControllerBase
 
         return Ok(ApiResponse<LoginResponse>.Success(response));
     }
+    /// <summary>
+    /// Updates the Firebase Cloud Messaging (FCM) token for the authenticated user.
+    /// This token is used to send push notifications to the user's device.
+    /// </summary>
     [Authorize]
     [HttpPost("fcm-token")]
     public async Task<IActionResult> UpdateFcmToken([FromBody] FcmTokenRequest request)
@@ -176,7 +179,8 @@ public class AuthController : ControllerBase
 
 
     /// <summary>
-    /// Initiate registration and send OTP to email.
+    /// Initiate user registration and send an OTP (One-Time Password) to the provided email for verification.
+    /// This step creates a new user as unverified if they don't already exist or handles resending OTP.
     /// </summary>
     [HttpPost("registrations")]
     public async Task<IActionResult> CreateRegistration([FromBody] RegisterRequest request)
@@ -242,7 +246,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Complete registration by verifying OTP and setting password.
+    /// Completes the user registration process by verifying the OTP, setting the username, full name, and password.
     /// </summary>
     [HttpPost("registrations/complete")] 
     public async Task<IActionResult> CompleteRegistration([FromBody] CompleteRegistrationRequest request)
@@ -313,7 +317,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Authenticate or register user using Google OAuth and return JWT token.
+    /// Authenticates a user using Google OAuth and creates/updates a user session.
     /// </summary>
     [HttpPost("google-sessions")]
     public async Task<IActionResult> CreateGoogleSession([FromBody] GoogleLoginRequest request)
@@ -389,7 +393,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Initiates forgot password process: sends OTP to the user's email.
+    /// Initiates the forgot password process by sending a password reset OTP to the user's email.
     /// </summary>
     [HttpPost("forgot-password")]
     public async Task<IActionResult> ForgotPassword([FromBody] EduVision.Models.DTO.Request.ForgotPasswordRequest request)
@@ -422,7 +426,7 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Resets the password after verifying OTP.
+    /// Resets the user's password using a valid OTP and the new password.
     /// </summary>
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] EduVision.Models.DTO.Request.ResetPasswordRequest request)
@@ -453,8 +457,9 @@ public class AuthController : ControllerBase
 
 
     /// <summary>
-    /// Log out of the current instance by revoking the Refresh Token.
+    /// Logs out the user by revoking the provided refresh token.
     /// </summary>
+    [Authorize]
     [HttpPost("logout")]
     public IActionResult Logout([FromBody] EduVision.Models.DTO.Request.RefreshTokenRequest request)
     {
@@ -471,8 +476,9 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Log out of all devices by revoking all user Refresh Tokens.
+    /// Logs out all user sessions by revoking all refresh tokens associated with the authenticated user.
     /// </summary>
+    [Authorize]
     [HttpPost("logout-all")]
     public IActionResult LogoutAll()
     {
