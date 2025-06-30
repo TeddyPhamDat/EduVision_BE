@@ -119,15 +119,27 @@ namespace EduVision.Controllers
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
                 return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
 
+            // Create database entry with "Processing" status
+            var promptEntity = new Prompt
+            {
+                UserId = userId,
+                Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - slides",
+                CreatedAt = DateTime.UtcNow,
+                Status = "Processing"
+            };
+            _dbContext.Prompts.Add(promptEntity);
+            await _dbContext.SaveChangesAsync();
+
             // Enqueue the job to Kafka
             await _kafkaProducerService.ProduceAsync(new SlideGenerationKafkaMessage
             {
                 UserId = userId,
-                Request = request
+                Request = request,
+                PromptId = promptEntity.Promptid
             });
 
             // Return 202 Accepted
-            return Accepted(ApiResponse<string>.Success("Slide generation request accepted and is being processed."));
+            return Accepted(ApiResponse<int>.Success(promptEntity.Promptid, "Slide generation request accepted and is being processed."));
         }
 
         /// <summary>

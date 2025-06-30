@@ -6,5 +6,6 @@ namespace EduVision.Models.DTO.Request
         public EducationRequestDto Request { get; set; }
         // flag to indicate if video generation is requested
         public bool GenerateVideo { get; set; } = false;
+        public int PromptId { get; set; }
     }
 }

@@ -92,6 +92,8 @@ namespace EduVision.Services.Messaging
                                 var result = consumer.Consume(TimeSpan.FromSeconds(1));
                                 if (result == null) continue;
 
+                                _logger.LogInformation("Raw Kafka message: {Value}", result.Message.Value);
+
                                 _ = Task.Run(async () =>
                                 {
                                     try
@@ -175,6 +177,13 @@ namespace EduVision.Services.Messaging
 
             try
             {
+                var prompt = await dbContext.Prompts.FindAsync(message.PromptId);
+                if (prompt == null)
+                {
+                    logger.LogError("Prompt not found for PromptId: {PromptId}", message.PromptId);
+                    return;
+                }
+
                 // Generate slides
                 var slideResult = await geminiService.GenerateEducationSlidesAsync(request.Subject, request.Chapter, request.Grade);
 
@@ -187,6 +196,8 @@ namespace EduVision.Services.Messaging
                         await UpdateFailedStatus(dbContext, userId, request, "Failed to generate slides");
                     }
                     
+                    prompt.Status = "Failed";
+                    await dbContext.SaveChangesAsync();
                     return;
                 }
 
@@ -208,6 +219,8 @@ namespace EduVision.Services.Messaging
                         await UpdateFailedStatus(dbContext, userId, request, "Not enough images found");
                     }
                     
+                    prompt.Status = "Failed";
+                    await dbContext.SaveChangesAsync();
                     return;
                 }
 
@@ -234,18 +247,18 @@ namespace EduVision.Services.Messaging
                     if (generateVideo)
                     {
                         // For video generation, find the existing "Processing" prompt
-                        var prompt = await dbContext.Prompts
+                        var existingPrompt = await dbContext.Prompts
                             .Where(p => p.UserId == userId && p.Status == "Processing")
                             .OrderByDescending(p => p.CreatedAt)
                             .FirstOrDefaultAsync();
 
-                        if (prompt != null)
+                        if (existingPrompt != null)
                         {
-                            promptId = prompt.Promptid;
+                            promptId = existingPrompt.Promptid;
                             
                             // Update the existing slide with the URL
                             var slide = await dbContext.Slides
-                                .Where(s => s.PromptId == prompt.Promptid)
+                                .Where(s => s.PromptId == existingPrompt.Promptid)
                                 .FirstOrDefaultAsync();
                                 
                             if (slide != null)
@@ -356,6 +369,9 @@ namespace EduVision.Services.Messaging
                         
                         // Update status to failed
                         await UpdateFailedStatus(dbContext, userId, request, $"Failed to initiate video processing: {ex.Message}");
+                        
+                        prompt.Status = "Failed";
+                        await dbContext.SaveChangesAsync();
                     }
                 }
 
@@ -369,6 +385,9 @@ namespace EduVision.Services.Messaging
 
                 logger.LogInformation("Slide generation completed for UserId: {UserId}, GenerateVideo: {GenerateVideo}", 
                     userId, generateVideo);
+                
+                prompt.Status = "Completed";
+                await dbContext.SaveChangesAsync();
             }
             catch (Exception ex)
             {
@@ -378,10 +397,17 @@ namespace EduVision.Services.Messaging
                 {
                     await UpdateFailedStatus(dbContext, userId, request, $"Error: {ex.Message}");
                 }
+                
+                var prompt = await dbContext.Prompts.FindAsync(message.PromptId);
+                if (prompt != null)
+                {
+                    prompt.Status = "Failed";
+                    await dbContext.SaveChangesAsync();
+                }
             }
         }
 
-        private async Task UpdateFailedStatus(EduVisionContext dbContext, int userId, EducationRequestDto request, string errorMessage)
+        private async Task UpdateFailedStatus(DBContext.EduVisionContext dbContext, int userId, EducationRequestDto request, string errorMessage)
         {
             try
             {

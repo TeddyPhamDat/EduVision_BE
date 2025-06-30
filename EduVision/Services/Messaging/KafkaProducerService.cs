@@ -38,11 +38,13 @@ namespace EduVision.Services.Messaging
         {
             var targetTopic = topic ?? _kafkaConfig.SlideGenerationTopic; // Default if not specified
             var json = JsonSerializer.Serialize(message);
+            _logger.LogInformation("Serialized Kafka message: {Json}", json);
             
             try 
             {
                 _logger.LogInformation("Producing message to topic {Topic}", targetTopic);
                 await _producer.ProduceAsync(targetTopic, new Message<Null, string> { Value = json });
+                _logger.LogInformation("Message produced to topic {Topic}", targetTopic);
             }
             catch (Exception ex)
             {
