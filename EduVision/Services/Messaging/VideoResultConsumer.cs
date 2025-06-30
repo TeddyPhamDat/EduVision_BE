@@ -49,8 +49,7 @@ namespace EduVision.Services.Messaging
                         BootstrapServers = _kafkaConfig.BootstrapServers,
                         GroupId = "video-result-group",
                         AutoOffsetReset = AutoOffsetReset.Latest,
-                        EnableAutoCommit = true,
-                        AutoCommitIntervalMs = 5000,
+                        EnableAutoCommit = false, // Manual commit
                         SessionTimeoutMs = 10000,
                         SocketTimeoutMs = 10000,
                     };
@@ -81,24 +80,23 @@ namespace EduVision.Services.Messaging
                                 var result = consumer.Consume(TimeSpan.FromSeconds(1));
                                 if (result == null) continue;
 
-                                _ = Task.Run(async () =>
+                                var message = JsonSerializer.Deserialize<VideoResultKafkaMessage>(result.Message.Value);
+                                if (message == null)
                                 {
-                                    try
-                                    {
-                                        var message = JsonSerializer.Deserialize<VideoResultKafkaMessage>(result.Message.Value);
-                                        if (message == null)
-                                        {
-                                            _logger.LogWarning("Received null or invalid message from Kafka.");
-                                            return;
-                                        }
+                                    _logger.LogWarning("Received null or invalid message from Kafka.");
+                                    continue;
+                                }
 
-                                        await ProcessVideoResultAsync(message);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogError(ex, "Error processing Kafka message");
-                                    }
-                                }, stoppingToken);
+                                try
+                                {
+                                    await ProcessVideoResultAsync(message);
+                                    consumer.Commit(result); // Commit only after successful processing
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "Error processing Kafka message");
+                                    // Optionally: handle retries or dead-letter here
+                                }
                             }
                             catch (ConsumeException ex)
                             {

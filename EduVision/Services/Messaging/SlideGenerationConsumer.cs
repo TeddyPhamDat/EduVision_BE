@@ -46,7 +46,6 @@ namespace EduVision.Services.Messaging
                 {
                     if (_connectionAttempted)
                     {
-                        // If we've already tried to connect, wait before retrying
                         await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
                     }
                     _connectionAttempted = true;
@@ -56,13 +55,11 @@ namespace EduVision.Services.Messaging
                         BootstrapServers = _kafkaConfig.BootstrapServers,
                         GroupId = "slide-generation-group-dev2",
                         AutoOffsetReset = AutoOffsetReset.Earliest,
-                        EnableAutoCommit = true,
-                        AutoCommitIntervalMs = 5000,
+                        EnableAutoCommit = false, // Manual commit
                         SessionTimeoutMs = 10000,
                         SocketTimeoutMs = 10000,
                     };
 
-                    // Conditionally apply security settings if provided
                     if (!string.IsNullOrEmpty(_kafkaConfig.SaslUsername) && !string.IsNullOrEmpty(_kafkaConfig.SaslPassword))
                     {
                         config.SecurityProtocol = SecurityProtocol.SaslSsl;
@@ -75,7 +72,6 @@ namespace EduVision.Services.Messaging
 
                     try
                     {
-                        // Set a timeout for subscription operation
                         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                         var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, stoppingToken);
 
@@ -83,40 +79,37 @@ namespace EduVision.Services.Messaging
                         _logger.LogInformation("Successfully connected to Kafka. Listening to topic: {Topic}",
                             _kafkaConfig.SlideGenerationTopic);
 
-                        // Process messages until cancellation is requested
                         while (!stoppingToken.IsCancellationRequested)
                         {
                             try
                             {
-                                // Use a short timeout to avoid blocking forever
                                 var result = consumer.Consume(TimeSpan.FromSeconds(1));
                                 if (result == null) continue;
 
                                 _logger.LogInformation("Raw Kafka message: {Value}", result.Message.Value);
 
-                                _ = Task.Run(async () =>
+                                var message = JsonSerializer.Deserialize<SlideGenerationKafkaMessage>(result.Message.Value);
+                                if (message == null)
                                 {
-                                    try
-                                    {
-                                        var message = JsonSerializer.Deserialize<SlideGenerationKafkaMessage>(result.Message.Value);
-                                        if (message == null)
-                                        {
-                                            _logger.LogWarning("Received null or invalid message from Kafka.");
-                                            return;
-                                        }
+                                    _logger.LogWarning("Received null or invalid message from Kafka.");
+                                    continue;
+                                }
 
-                                        await ProcessMessageAsync(message);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogError(ex, "Error processing Kafka message");
-                                    }
-                                }, stoppingToken);
+                                try
+                                {
+                                    await ProcessMessageAsync(message);
+                                    consumer.Commit(result); // Commit only after successful processing
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, "Error processing Kafka message");
+                                    // Optionally: handle retries or dead-letter here
+                                }
                             }
                             catch (ConsumeException ex)
                             {
                                 _logger.LogError(ex, "Kafka consume error");
-                                break; // Break inner loop to recreate consumer
+                                break;
                             }
                             catch (OperationCanceledException)
                             {
