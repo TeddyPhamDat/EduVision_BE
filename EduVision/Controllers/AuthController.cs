@@ -476,41 +476,6 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Logs out all user sessions by revoking all refresh tokens associated with the authenticated user.
-    /// </summary>
-    [Authorize]
-    [HttpPost("logout-all")]
-    public IActionResult LogoutAll()
-    {
-        var userId = GetUserIdFromAccessToken(); // lấy từ ClaimsPrincipal
-
-        var userTokens = _context.RefreshTokens
-            .Where(rt => rt.UserId == userId && !rt.IsRevoked)
-            .ToList();
-
-        foreach (var token in userTokens)
-        {
-
-            token.IsRevoked = true;
-        }
-
-        _context.SaveChanges();
-
-        return Ok(ApiResponse<object>.Success("All sessions logged out"));
-    }
-
-    private int GetUserIdFromAccessToken()
-    {
-        var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == "userId");
-        foreach (var claim in User.Claims)
-        {
-            Console.WriteLine($"{claim.Type}: {claim.Value}");
-        }
-        return int.Parse(userIdClaim?.Value ?? "0");
-    }
-
-
-    /// <summary>
     /// Generates a 6-digit OTP code for email verification.
     /// </summary>
     private string GenerateOtpToken()

@@ -63,11 +63,12 @@ namespace EduVision.Services.Data
             int bonusSlides = bonusVideo * 5;             // 1 video = 5 slides
 
             var now = DateTime.UtcNow;
-            var currentMonth = new DateTime(now.Year, now.Month, 1);
+            var currentMonthStart = new DateTime(now.Year, now.Month, 1);
+            var periodEnd = currentMonthStart.AddMonths(1).AddDays(-1);
 
-            // Cập nhật hoặc tạo quota cho "video"
+            // Video quota
             var videoQuota = await _context.UserQuota
-                .FirstOrDefaultAsync(q => q.UserId == userId && q.QuotaType == "video" && q.PeriodStart == currentMonth);
+                .FirstOrDefaultAsync(q => q.UserId == userId && q.QuotaType == "video" && q.PeriodStart == currentMonthStart);
 
             if (videoQuota == null)
             {
@@ -77,15 +78,19 @@ namespace EduVision.Services.Data
                     QuotaType = "video",
                     QuotaLimit = 0,
                     QuotaUsed = 0,
-                    PeriodStart = currentMonth
+                    PeriodStart = currentMonthStart,
+                    PeriodEnd = periodEnd,
+                    CreatedAt = now,
+                    UpdatedAt = now
                 };
                 _context.UserQuota.Add(videoQuota);
             }
             videoQuota.QuotaLimit += bonusVideo;
+            videoQuota.UpdatedAt = now;
 
-            // Cập nhật hoặc tạo quota cho "slides"
+            // Slides quota
             var slideQuota = await _context.UserQuota
-                .FirstOrDefaultAsync(q => q.UserId == userId && q.QuotaType == "slides" && q.PeriodStart == currentMonth);
+                .FirstOrDefaultAsync(q => q.UserId == userId && q.QuotaType == "slides" && q.PeriodStart == currentMonthStart);
 
             if (slideQuota == null)
             {
@@ -95,11 +100,15 @@ namespace EduVision.Services.Data
                     QuotaType = "slides",
                     QuotaLimit = 0,
                     QuotaUsed = 0,
-                    PeriodStart = currentMonth
+                    PeriodStart = currentMonthStart,
+                    PeriodEnd = periodEnd,
+                    CreatedAt = now,
+                    UpdatedAt = now
                 };
                 _context.UserQuota.Add(slideQuota);
             }
             slideQuota.QuotaLimit += bonusSlides;
+            slideQuota.UpdatedAt = now;
 
             await _context.SaveChangesAsync();
         }
@@ -113,7 +122,8 @@ namespace EduVision.Services.Data
             QuotaType = uq.QuotaType,
             AmountUsed = uq.QuotaUsed,
             QuotaLimit = uq.QuotaLimit,
-            UsedAt = uq.UpdatedAt // Hoặc một trường nào đó bạn muốn dùng để thể hiện thời gian sử dụng
+            PeriodStart = uq.PeriodStart,
+            PeriodEnd = uq.PeriodEnd
         })
         .ToListAsync();
 
