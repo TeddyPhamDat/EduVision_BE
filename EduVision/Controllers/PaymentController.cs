@@ -9,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Net.payOS;
 using Net.payOS.Types;
 using System;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace EduVision.Controllers
 {
@@ -52,8 +54,19 @@ namespace EduVision.Controllers
                     if (payment.UserId.HasValue && payment.Amount.HasValue)
                     {
                         await _quotaService.IncreaseQuotaAsync(payment.UserId.Value, payment.Amount.Value);
+
+                        // Create a notification for successful payment
+                        var notification = new Notification
+                        {
+                            UserId = payment.UserId.Value,
+                            Message = $"Your payment of {payment.Amount.Value} has been successfully processed.",
+                            CreatedAt = DateTime.UtcNow
+                        };
+
+                        // Add the notification to the context and save changes
+                        _context.Notifications.Add(notification);
+                        await _context.SaveChangesAsync();
                     }
-                    await _context.SaveChangesAsync();
                 }
                 // Return success response to the client.
                 return Ok(ApiResponse<object>.Success(null, "Paid & Quota Updated", 0));
@@ -62,5 +75,24 @@ namespace EduVision.Controllers
             // Return failure response if not paid.
             return Ok(ApiResponse<object>.Fail("Not Paid", -1));
         }
+
+        /// <summary>
+        /// Retrieves the payment history (quota top-ups) for a specific user.
+        /// </summary>
+        [HttpGet("history")]
+        public async Task<IActionResult> GetPaymentHistory([FromQuery] int userId)
+        {
+            var payments = await _context.Payments
+                .Where(p => p.UserId == userId)
+                .OrderByDescending(p => p.CreatedAt)
+                .ToListAsync();
+
+            if (payments == null || payments.Count == 0)
+                return NotFound(ApiResponse<object>.Fail("No payment history found for this user", 404));
+
+            return Ok(ApiResponse<object>.Success(new { payments }));
+        }
+
+        
     }
 }

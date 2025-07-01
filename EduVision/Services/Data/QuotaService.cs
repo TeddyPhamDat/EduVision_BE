@@ -1,7 +1,10 @@
 ﻿using EduVision.DBContext;
 using EduVision.Models;
+using EduVision.Models.DTO.Response;
 using Microsoft.EntityFrameworkCore;
-
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace EduVision.Services.Data
 {
@@ -101,5 +104,20 @@ namespace EduVision.Services.Data
             await _context.SaveChangesAsync();
         }
 
+       public async Task<List<QuotaHistoryResponse>> GetQuotaHistoryAsync(int userId)
+{
+    var history = await _context.UserQuota
+        .Where(uq => uq.UserId == userId)
+        .Select(uq => new QuotaHistoryResponse
+        {
+            QuotaType = uq.QuotaType,
+            AmountUsed = uq.QuotaUsed,
+            QuotaLimit = uq.QuotaLimit,
+            UsedAt = uq.UpdatedAt // Hoặc một trường nào đó bạn muốn dùng để thể hiện thời gian sử dụng
+        })
+        .ToListAsync();
+
+    return history;
+}
     }
 }
