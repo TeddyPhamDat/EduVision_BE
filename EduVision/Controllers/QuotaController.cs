@@ -51,6 +51,20 @@ namespace EduVision.Controllers
             return Ok(ApiResponse<object>.Success("", "Quota used successfully."));
         }
 
+        /// <summary>
+        /// Retrieves the quota usage history for a specific user.
+        /// </summary>
+        [HttpGet("history")]
+        public async Task<IActionResult> GetQuotaHistory([FromQuery] int userId)
+        {
+            var quotaHistory = await _quotaService.GetQuotaHistoryAsync(userId);
+
+            if (quotaHistory == null || quotaHistory.Count == 0)
+                return NotFound(ApiResponse<object>.Fail("No quota history found for this user", 404));
+
+            return Ok(ApiResponse<object>.Success(quotaHistory));
+        }
+
         ///// <summary>
         ///// [Admin Only] Manually updates a user's quota for a specific resource type.
         ///// This API is intended for administrative purposes to adjust user quotas.
