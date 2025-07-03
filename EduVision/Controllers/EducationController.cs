@@ -138,6 +138,16 @@ namespace EduVision.Controllers
                 PromptId = promptEntity.Promptid
             });
 
+            // Create a notification for the user
+            var notification = new Notification
+            {
+                UserId = userId,
+                Message = "Your slide has been successfully generated.",
+                CreatedAt = DateTime.UtcNow
+            };
+            _dbContext.Notifications.Add(notification);
+            await _dbContext.SaveChangesAsync();
+
             // Return 202 Accepted
             return Accepted(ApiResponse<int>.Success(promptEntity.Promptid, "Slide generation request accepted and is being processed."));
         }
@@ -345,6 +355,17 @@ namespace EduVision.Controllers
                     PromptId = promptEntity.Promptid,
                     GenerateVideo = true  // Signal that video should be generated after slides
                 });
+
+
+                // Create a notification for the user
+                var notification = new Notification
+                {
+                    UserId = userId,
+                    Message = "Your video has been successfully generated.",
+                    CreatedAt = DateTime.UtcNow
+                };
+                _dbContext.Notifications.Add(notification);
+                await _dbContext.SaveChangesAsync();
 
                 // Return 202 Accepted with a tracking ID
                 return Accepted(ApiResponse<int>.Success(
