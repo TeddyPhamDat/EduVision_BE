@@ -38,7 +38,6 @@ public partial class EduVisionContext : DbContext
 
     public virtual DbSet<UserQuotum> UserQuota { get; set; }
 
-  
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -70,6 +69,11 @@ public partial class EduVisionContext : DbContext
             entity.HasOne(d => d.Slide).WithMany(p => p.GeneratedVideos)
                 .HasForeignKey(d => d.SlideId)
                 .HasConstraintName("FK__Generated__slide__4D94879B");
+
+            entity.HasOne(d => d.User).WithMany(p => p.GeneratedVideos)
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("FK_GeneratedVideo_User");
         });
 
         modelBuilder.Entity<Image>(entity =>

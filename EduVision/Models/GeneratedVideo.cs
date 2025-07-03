@@ -23,7 +23,11 @@ public partial class GeneratedVideo
 
     public string VideoUrl { get; set; }
 
+    public int? UserId { get; set; }
+
     public virtual Prompt Prompt { get; set; }
 
     public virtual Slide Slide { get; set; }
+
+    public virtual User User { get; set; }
 }

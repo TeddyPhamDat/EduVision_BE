@@ -1,4 +1,4 @@
-using EduVision.DBContext;
+﻿using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.DTO;
 using EduVision.Models.DTO.Request;
@@ -154,11 +154,115 @@ namespace EduVision.Controllers
                 return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
 
             var slides = await _dbContext.Slides
+                .Include(s => s.Prompt)
                 .Where(s => s.UserId == userId)
                 .OrderByDescending(s => s.SlideId)
                 .ToListAsync();
 
-            return Ok(ApiResponse<List<Slide>>.Success(slides));
+
+            var slideResponses = slides.Select(s => new SlideResponse
+            {
+                SlideId = s.SlideId,
+                PromptId = s.PromptId,
+                Type = s.Type,
+                Url = s.Url,
+                Status = s.Status,
+                PromptContent = s.Prompt?.Content // Lấy content từ Prompt
+            }).ToList();
+
+            return Ok(ApiResponse<List<SlideResponse>>.Success(slideResponses));
+        }
+
+        /// <summary>
+        /// Get all videos created by the authenticated user.
+        /// </summary>
+        [Authorize]
+        [HttpGet("videos")]
+        public async Task<IActionResult> GetMyVideos()
+        {
+            var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
+                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+
+            var videos = await _dbContext.GeneratedVideos
+                .Include(s => s.Prompt)
+                .Where(s => s.UserId == userId)
+                .OrderByDescending(s => s.SlideId)
+                .ToListAsync();
+
+
+            var videoResponses = videos.Select(v => new VideoResponse
+            {
+                GenerateVideoId = v.GenerateVideoId,
+                Status = v.Status,
+                CreatedAt = v.CreatedAt,
+                VideoUrl = v.VideoUrl,
+                PromptContent = v.Prompt?.Content // Lấy content từ Prompt
+            }).ToList();
+
+            return Ok(ApiResponse<List<VideoResponse>>.Success(videoResponses));
+        }
+
+
+/// <summary>
+/// Gets the latest slide status for a given user.
+/// </summary>
+        [HttpGet("slide-status/{userId}")]
+        public async Task<IActionResult> GetLatestSlideStatus(int userId)
+        {
+            var latestPrompt = await _dbContext.Prompts
+                .Where(p => p.UserId == userId)
+                .OrderByDescending(p => p.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (latestPrompt == null)
+                return NotFound(ApiResponse<string>.Fail("No prompt found for this user", 404));
+
+            var slide = await _dbContext.Slides
+                .Where(s => s.PromptId == latestPrompt.Promptid)
+                .FirstOrDefaultAsync();
+
+            if (slide == null)
+                return Ok(ApiResponse<object>.Success(new {
+                    Status = "Processing",
+                    Url = (string)""
+                }, "Slide is being generated"));
+
+            return Ok(ApiResponse<object>.Success(new {
+                Status = slide.Status,
+                Url = slide.Url
+            }, "Slide status fetched successfully"));
+        }
+
+
+/// <summary>
+/// Gets the latest video status for a given user.
+/// </summary>
+        [HttpGet("video-status/{userId}")]
+        public async Task<IActionResult> GetLatestVideoStatus(int userId)
+        {
+            var latestPrompt = await _dbContext.Prompts
+                .Where(p => p.UserId == userId)
+                .OrderByDescending(p => p.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            if (latestPrompt == null)
+                return NotFound(ApiResponse<string>.Fail("No prompt found for this user", 404));
+
+            var video = await _dbContext.GeneratedVideos
+                .Where(v => v.PromptId == latestPrompt.Promptid)
+                .FirstOrDefaultAsync();
+
+            if (video == null)
+                return Ok(ApiResponse<object>.Success(new {
+                    Status = "Processing",
+                    Url = (string)null
+                }, "Video is being generated"));
+
+            return Ok(ApiResponse<object>.Success(new {
+                Status = video.Status,
+                Url = video.VideoUrl
+            }, "Video status fetched successfully"));
         }
 
         /// <summary>
@@ -238,6 +342,7 @@ namespace EduVision.Controllers
                 {
                     UserId = userId,
                     Request = request,
+                    PromptId = promptEntity.Promptid,
                     GenerateVideo = true  // Signal that video should be generated after slides
                 });
 

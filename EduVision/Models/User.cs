@@ -33,6 +33,8 @@ public partial class User
 
     public string Address { get; set; }
 
+    public virtual ICollection<GeneratedVideo> GeneratedVideos { get; set; } = new List<GeneratedVideo>();
+
     public virtual ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 
     public virtual ICollection<OtpToken> OtpTokens { get; set; } = new List<OtpToken>();
