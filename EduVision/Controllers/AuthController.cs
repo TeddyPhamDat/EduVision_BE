@@ -82,6 +82,7 @@ public class AuthController : ControllerBase
         // Trả về response
         var response = new LoginResponse
         {
+            UserId = user.UserId,
             Token = tokens.AccessToken,
             RefreshToken = tokens.RefreshToken,
             TokenExpiresAt = tokens.AccessTokenExpireAt,
@@ -379,6 +380,7 @@ public class AuthController : ControllerBase
 
         var response = new LoginResponse
         {
+            UserId = user.UserId,
             Token = tokens.AccessToken,
             RefreshToken = tokens.RefreshToken,
             TokenExpiresAt = null,
