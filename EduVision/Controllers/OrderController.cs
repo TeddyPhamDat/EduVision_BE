@@ -97,34 +97,118 @@ namespace EduVision.Controllers
         {
             try
             {
-                if (status == "success")
+                // Get payment from database first
+                var payment = await _context.Payments.FirstOrDefaultAsync(p => p.OrderCode == orderCode.ToString());
+                if (payment == null)
                 {
-                    // Check payment status with PayOS
-                    var result = await _payOS.getPaymentLinkInformation(orderCode);
-                    
-                    if (result.status == "PAID")
-                    {
-                        // Update payment status in database (same logic as PaymentController)
-                        var payment = await _context.Payments.FirstOrDefaultAsync(p => p.OrderCode == orderCode.ToString());
-                        if (payment != null && payment.Status != "success")
+                    return Redirect($"{frontendUrl}?orderCode={orderCode}&status=error&message=Payment+not+found");
+                }
+
+                // Check payment status with PayOS to get the actual status
+                var payOSResult = await _payOS.getPaymentLinkInformation(orderCode);
+                string finalStatus = "failed";
+                string redirectStatus = "failed";
+
+                // Determine status based on PayOS response and time
+                switch (payOSResult.status.ToUpper())
+                {
+                    case "PAID":
+                        finalStatus = "success";
+                        redirectStatus = "success";
+                        
+                        // Update payment status if not already done
+                        if (payment.Status != "success")
                         {
                             payment.Status = "success";
-                            await _context.SaveChangesAsync();
+                            Console.WriteLine($"Payment {orderCode} marked as success in database");
                         }
-                        
-                        // Redirect to frontend success page
-                        return Redirect($"{frontendUrl}?orderCode={orderCode}&status=success");
-                    }
+                        break;
+
+                    case "CANCELLED":
+                        finalStatus = "cancelled";
+                        redirectStatus = "cancelled";
+                        payment.Status = "cancelled";
+                        Console.WriteLine($"Payment {orderCode} marked as cancelled by user");
+                        break;
+
+                    case "PENDING":
+                        // Check if payment is older than 5 minutes
+                        var fiveMinutesAgo = DateTime.UtcNow.AddMinutes(-5);
+                        if (payment.CreatedAt <= fiveMinutesAgo)
+                        {
+                            // Payment expired - mark as cancelled
+                            finalStatus = "cancelled";
+                            redirectStatus = "cancelled";
+                            payment.Status = "cancelled";
+                            Console.WriteLine($"Payment {orderCode} expired after 5 minutes, marked as cancelled");
+                        }
+                        else
+                        {
+                            // Still within 5 minutes - keep as pending
+                            finalStatus = "pending";
+                            redirectStatus = "pending";
+                            payment.Status = "pending";
+                            Console.WriteLine($"Payment {orderCode} still pending within time limit");
+                        }
+                        break;
+
+                    case "PROCESSING":
+                        finalStatus = "processing";
+                        redirectStatus = "processing";
+                        payment.Status = "processing";
+                        Console.WriteLine($"Payment {orderCode} is being processed");
+                        break;
+
+                    default:
+                        // Any other status (FAILED, etc.) - mark as failed
+                        finalStatus = "failed";
+                        redirectStatus = "failed";
+                        payment.Status = "failed";
+                        Console.WriteLine($"Payment {orderCode} marked as failed with status: {payOSResult.status}");
+                        break;
                 }
+
+                // Update payment status in database
+                await _context.SaveChangesAsync();
+                Console.WriteLine($"Payment {orderCode} database updated with status: {payment.Status}");
+
+                // Create appropriate redirect URL based on status
+                string redirectUrl = $"{frontendUrl}?orderCode={orderCode}&status={redirectStatus}";
                 
-                // Redirect to frontend with appropriate status
-                return Redirect($"{frontendUrl}?orderCode={orderCode}&status={status}");
+                // Add additional info for specific cases
+                if (redirectStatus == "cancelled" && payOSResult.status.ToUpper() == "PENDING")
+                {
+                    redirectUrl += "&reason=timeout";
+                }
+                else if (redirectStatus == "cancelled" && payOSResult.status.ToUpper() == "CANCELLED")
+                {
+                    redirectUrl += "&reason=user_cancelled";
+                }
+
+                Console.WriteLine($"Redirecting to: {redirectUrl}");
+                return Redirect(redirectUrl);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Payment callback error: {ex.Message}");
+                // Update payment as failed in case of error
+                try
+                {
+                    var payment = await _context.Payments.FirstOrDefaultAsync(p => p.OrderCode == orderCode.ToString());
+                    if (payment != null && payment.Status == "pending")
+                    {
+                        payment.Status = "failed";
+                        await _context.SaveChangesAsync();
+                        Console.WriteLine($"Payment {orderCode} marked as failed due to system error");
+                    }
+                }
+                catch (Exception dbEx)
+                {
+                    Console.WriteLine($"Database update error: {dbEx.Message}");
+                }
+                
                 // Redirect to frontend error page
-                return Redirect($"{frontendUrl}?orderCode={orderCode}&status=error");
+                return Redirect($"{frontendUrl}?orderCode={orderCode}&status=error&message=System+error");
             }
         }
     }
