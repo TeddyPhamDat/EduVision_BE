@@ -56,14 +56,19 @@ namespace EduVision.Controllers
                 _context.Payments.Add(payment);
                 await _context.SaveChangesAsync();
 
+                // Use backend callback URLs instead of direct frontend URLs
+                string baseUrl = $"{Request.Scheme}://{Request.Host}";
+                string returnUrl = $"{baseUrl}/api/orders/payment-callback?orderCode={orderCode}&status=success&frontendUrl={Uri.EscapeDataString(request.ReturnUrl)}";
+                string cancelUrl = $"{baseUrl}/api/orders/payment-callback?orderCode={orderCode}&status=cancel&frontendUrl={Uri.EscapeDataString(request.CancelUrl)}";
+
                 // Prepare payment data for the external payment gateway.
                 var paymentData = new PaymentData(
                     orderCode,
                     request.Amount,
                     $"Nạp quota cho user {request.UserId}",
                     items,
-                    request.ReturnUrl,
-                    request.CancelUrl,
+                    returnUrl,
+                    cancelUrl,
                     request.UserId.ToString() // Store userId in order note for reference.
                 );
 
@@ -78,6 +83,48 @@ namespace EduVision.Controllers
                 // Log the error and return a generic failure response.
                 Console.WriteLine(ex);
                 return Ok(ApiResponse<object>.Fail("Failed", -1));
+            }
+        }
+
+        /// <summary>
+        /// Handles payment callback from PayOS and redirects to frontend
+        /// </summary>
+        [HttpGet("payment-callback")]
+        public async Task<IActionResult> PaymentCallback(
+            [FromQuery] long orderCode, 
+            [FromQuery] string status, 
+            [FromQuery] string frontendUrl)
+        {
+            try
+            {
+                if (status == "success")
+                {
+                    // Check payment status with PayOS
+                    var result = await _payOS.getPaymentLinkInformation(orderCode);
+                    
+                    if (result.status == "PAID")
+                    {
+                        // Update payment status in database (same logic as PaymentController)
+                        var payment = await _context.Payments.FirstOrDefaultAsync(p => p.OrderCode == orderCode.ToString());
+                        if (payment != null && payment.Status != "success")
+                        {
+                            payment.Status = "success";
+                            await _context.SaveChangesAsync();
+                        }
+                        
+                        // Redirect to frontend success page
+                        return Redirect($"{frontendUrl}?orderCode={orderCode}&status=success");
+                    }
+                }
+                
+                // Redirect to frontend with appropriate status
+                return Redirect($"{frontendUrl}?orderCode={orderCode}&status={status}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Payment callback error: {ex.Message}");
+                // Redirect to frontend error page
+                return Redirect($"{frontendUrl}?orderCode={orderCode}&status=error");
             }
         }
     }
