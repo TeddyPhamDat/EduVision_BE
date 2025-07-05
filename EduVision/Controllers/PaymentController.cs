@@ -36,6 +36,7 @@ namespace EduVision.Controllers
 
         /// <summary>
         /// Checks the payment status for a given order code and updates quota if paid.
+        /// Note: Quota update now happens in OrderController.PaymentCallback for immediate processing.
         /// </summary>
         [HttpGet("status")]
         public async Task<IActionResult> CheckPaymentStatus([FromQuery] long orderCode)
@@ -47,9 +48,15 @@ namespace EduVision.Controllers
             {
                 // Find the payment record in the database.
                 var payment = await _context.Payments.FirstOrDefaultAsync(p => p.OrderCode == orderCode.ToString());
-                if (payment != null && payment.Status != "success")
+                if (payment != null && payment.Status == "success")
                 {
-                    // Mark payment as successful and update user quota.
+                    // Payment already processed successfully
+                    return Ok(ApiResponse<object>.Success(null, "Paid & Quota Updated", 0));
+                }
+                else if (payment != null && payment.Status != "success")
+                {
+                    // Payment exists but not marked as success - this shouldn't happen with new flow
+                    // But we handle it as backup
                     payment.Status = "success";
                     if (payment.UserId.HasValue && payment.Amount.HasValue)
                     {
@@ -59,11 +66,9 @@ namespace EduVision.Controllers
                         var notification = new Notification
                         {
                             UserId = payment.UserId.Value,
-                            Message = $"Your payment of {payment.Amount.Value} has been successfully processed.",
+                            Message = $"Your payment of {payment.Amount.Value} VND has been successfully processed (backup processing).",
                             CreatedAt = DateTime.UtcNow
                         };
-
-                        // Add the notification to the context and save changes
                         _context.Notifications.Add(notification);
                         await _context.SaveChangesAsync();
                     }

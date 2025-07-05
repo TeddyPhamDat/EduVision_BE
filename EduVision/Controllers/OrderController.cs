@@ -2,6 +2,7 @@ using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
+using EduVision.Services.Data;
 using Microsoft.AspNetCore.Mvc;
 using Net.payOS;
 using Net.payOS.Types;
@@ -16,13 +17,15 @@ namespace EduVision.Controllers
     {
         private readonly PayOS _payOS;
         private readonly EduVisionContext _context;
+        private readonly IQuotaService _quotaService;
 
-        // Constructor injects payment gateway and database context.
+        // Constructor injects payment gateway, database context, and quota service.
         // Why: Follows dependency injection for testability and separation of concerns.
-        public OrderController(PayOS payOS, EduVisionContext context)
+        public OrderController(PayOS payOS, EduVisionContext context, IQuotaService quotaService)
         {
             _payOS = payOS;
             _context = context;
+            _quotaService = quotaService;
         }
 
         /// <summary>
@@ -109,7 +112,7 @@ namespace EduVision.Controllers
                 string finalStatus = "failed";
                 string redirectStatus = "failed";
 
-                // Determine status based on PayOS response and time
+                // Simplified status logic: only success or cancelled
                 switch (payOSResult.status.ToUpper())
                 {
                     case "PAID":
@@ -121,50 +124,32 @@ namespace EduVision.Controllers
                         {
                             payment.Status = "success";
                             Console.WriteLine($"Payment {orderCode} marked as success in database");
+                            
+                            // Increase quota immediately upon successful payment
+                            if (payment.UserId.HasValue && payment.Amount.HasValue)
+                            {
+                                await _quotaService.IncreaseQuotaAsync(payment.UserId.Value, payment.Amount.Value);
+                                Console.WriteLine($"Quota increased for user {payment.UserId.Value} by {payment.Amount.Value}");
+                                
+                                // Create a notification for successful payment
+                                var notification = new Notification
+                                {
+                                    UserId = payment.UserId.Value,
+                                    Message = $"Your payment of {payment.Amount.Value} VND has been successfully processed and quota updated.",
+                                    CreatedAt = DateTime.UtcNow
+                                };
+                                _context.Notifications.Add(notification);
+                                Console.WriteLine($"Notification created for user {payment.UserId.Value}");
+                            }
                         }
-                        break;
-
-                    case "CANCELLED":
-                        finalStatus = "cancelled";
-                        redirectStatus = "cancelled";
-                        payment.Status = "cancelled";
-                        Console.WriteLine($"Payment {orderCode} marked as cancelled by user");
-                        break;
-
-                    case "PENDING":
-                        // Check if payment is older than 5 minutes
-                        var fiveMinutesAgo = DateTime.UtcNow.AddMinutes(-5);
-                        if (payment.CreatedAt <= fiveMinutesAgo)
-                        {
-                            // Payment expired - mark as cancelled
-                            finalStatus = "cancelled";
-                            redirectStatus = "cancelled";
-                            payment.Status = "cancelled";
-                            Console.WriteLine($"Payment {orderCode} expired after 5 minutes, marked as cancelled");
-                        }
-                        else
-                        {
-                            // Still within 5 minutes - keep as pending
-                            finalStatus = "pending";
-                            redirectStatus = "pending";
-                            payment.Status = "pending";
-                            Console.WriteLine($"Payment {orderCode} still pending within time limit");
-                        }
-                        break;
-
-                    case "PROCESSING":
-                        finalStatus = "processing";
-                        redirectStatus = "processing";
-                        payment.Status = "processing";
-                        Console.WriteLine($"Payment {orderCode} is being processed");
                         break;
 
                     default:
-                        // Any other status (FAILED, etc.) - mark as failed
-                        finalStatus = "failed";
-                        redirectStatus = "failed";
-                        payment.Status = "failed";
-                        Console.WriteLine($"Payment {orderCode} marked as failed with status: {payOSResult.status}");
+                        // All other statuses (CANCELLED, FAILED, PENDING, PROCESSING) → cancelled
+                        finalStatus = "cancelled";
+                        redirectStatus = "cancelled";
+                        payment.Status = "cancelled";
+                        Console.WriteLine($"Payment {orderCode} marked as cancelled with PayOS status: {payOSResult.status}");
                         break;
                 }
 
@@ -175,14 +160,21 @@ namespace EduVision.Controllers
                 // Create appropriate redirect URL based on status
                 string redirectUrl = $"{frontendUrl}?orderCode={orderCode}&status={redirectStatus}";
                 
-                // Add additional info for specific cases
-                if (redirectStatus == "cancelled" && payOSResult.status.ToUpper() == "PENDING")
+                // Add reason for cancelled payments
+                if (redirectStatus == "cancelled")
                 {
-                    redirectUrl += "&reason=timeout";
-                }
-                else if (redirectStatus == "cancelled" && payOSResult.status.ToUpper() == "CANCELLED")
-                {
-                    redirectUrl += "&reason=user_cancelled";
+                    if (payOSResult.status.ToUpper() == "CANCELLED")
+                    {
+                        redirectUrl += "&reason=user_cancelled";
+                    }
+                    else if (payOSResult.status.ToUpper() == "FAILED")
+                    {
+                        redirectUrl += "&reason=payment_failed";
+                    }
+                    else
+                    {
+                        redirectUrl += "&reason=timeout_or_other";
+                    }
                 }
 
                 Console.WriteLine($"Redirecting to: {redirectUrl}");
