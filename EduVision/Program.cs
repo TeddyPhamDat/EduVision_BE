@@ -169,12 +169,11 @@ builder.Services.AddAuthorization();
 // This is necessary for browser-based clients to interact with the API.
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowFrontend",
+    options.AddPolicy("AllowAll",
         builder => builder
-            .WithOrigins("http://127.0.0.1:5500", "http://localhost:5500")
+            .AllowAnyOrigin()
             .AllowAnyHeader()
-            .AllowAnyMethod()
-            .AllowCredentials());
+            .AllowAnyMethod());
 });
 
 var app = builder.Build();
@@ -205,10 +204,8 @@ app.UseHttpsRedirection();
 // Use custom middleware for handling application-specific exceptions.
 app.UseMiddleware<ExceptionMiddleware>();
 
-// Enable CORS for frontend clients.
-app.UseCors("AllowFrontend");
-
-// Enable authentication and authorization for protected endpoints.
+//app.UseCors("AllowFrontend");
+app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();
 
