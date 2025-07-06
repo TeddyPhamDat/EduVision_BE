@@ -1,0 +1,382 @@
+﻿<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <title>Lesson Presentation - Interactive</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/reveal.js/dist/reveal.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/default.min.css">
+    <!-- Vietnamese-compatible fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans:wght@300;400;500;600;700&family=Be+Vietnam+Pro:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        body {
+            background: radial-gradient(ellipse at center, #8b5cf6 0%, #6d28d9 35%, #5b21b6 70%, #4c1d95 100%) !important;
+            font-family: 'Be Vietnam Pro', 'Inter', 'Noto Sans', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+        }
+
+        .reveal {
+            background: radial-gradient(ellipse at center, #8b5cf6 0%, #6d28d9 35%, #5b21b6 70%, #4c1d95 100%) !important;
+        }
+
+            .reveal .slides {
+                padding: 0;
+                height: 100vh;
+                width: 100vw;
+            }
+
+                .reveal .slides section {
+                    height: 100vh;
+                    width: 100vw;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    text-align: center;
+                    padding: 20px 0;
+                    background: transparent !important;
+                }
+
+        .interactive-slide {
+            background: rgba(255, 255, 255, 0.15) !important;
+            border-radius: 24px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(139, 92, 246, 0.2);
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            padding: 35px 45px;
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            justify-content: space-between;
+            box-sizing: border-box;
+            width: 88vw;
+            max-width: 1500px;
+            height: 65vh;
+            max-height: 600px;
+            margin: auto;
+            overflow-y: auto;
+            margin-top: 17.5vh;
+            gap: 50px;
+            position: relative;
+        }
+
+            .interactive-slide::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+                border-radius: 24px;
+                pointer-events: none;
+            }
+
+        /* Left side - Text content */
+        .slide-text-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: flex-start;
+            text-align: left;
+            max-width: 60%;
+        }
+
+        .slide-title {
+            font-size: 4.0rem;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 20px;
+            margin-top: 0;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
+            position: relative;
+            text-align: left;
+            width: 100%;
+            line-height: 1.2;
+            font-family: 'Be Vietnam Pro', 'Inter', 'Noto Sans', sans-serif;
+            font-feature-settings: 'kern' 1;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+            .slide-title::after {
+                content: "";
+                position: absolute;
+                left: 0;
+                bottom: -10px;
+                transform: none;
+                height: 4px;
+                width: 600px;
+                background: linear-gradient(90deg, #8b5cf6, #6366f1, #6d28d9);
+                border-radius: 2px;
+                box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+            }
+
+        .slide-content {
+            font-size: 1.5rem;
+            color: #ffffff;
+            line-height: 1.6;
+            text-align: left;
+            max-width: 100%;
+            flex-grow: 1;
+            font-family: 'Be Vietnam Pro', 'Inter', 'Noto Sans', 'Georgia', serif;
+            font-weight: 400;
+            letter-spacing: 0.2px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+            font-feature-settings: 'kern' 1;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* Right side - Image */
+        .slide-image-container {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            max-width: 35%;
+        }
+
+        .slide-image {
+            max-width: 100%;
+            max-height: 400px;
+            border-radius: 15px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            transition: transform 0.3s ease;
+            cursor: pointer;
+            object-fit: contain;
+        }
+
+            .slide-image:hover {
+                transform: scale(1.05);
+            }
+
+        /* Code block styling */
+        pre {
+            background: #2c3e50;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+
+            pre code {
+                color: #ecf0f1;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 1rem;
+            }
+
+        /* Link styling */
+        a {
+            color: #8b5cf6;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+            a:hover {
+                color: #6d28d9;
+                text-decoration: underline;
+            }
+
+        /* Fragment animations */
+        .fragment.fade-up {
+            transform: translateY(20px);
+            opacity: 0;
+        }
+
+            .fragment.fade-up.visible {
+                transform: translateY(0);
+                opacity: 1;
+            }
+
+        .fragment.shrink {
+            transform: scale(1);
+        }
+
+            .fragment.shrink.visible {
+                transform: scale(0.8);
+            }
+
+        /* Math styling */
+        .MathJax {
+            color: #2c3e50;
+            font-family: 'Be Vietnam Pro', 'Inter', 'Noto Sans', sans-serif;
+        }
+
+        /* Responsive design */
+        @media (max-width: 1200px) {
+            .interactive-slide {
+                width: 90vw;
+                height: 70vh;
+                padding: 30px;
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .slide-text-content {
+                max-width: 100%;
+                text-align: center;
+                align-items: center;
+            }
+
+            .slide-title {
+                font-size: 1.6rem;
+                margin-bottom: 15px;
+                text-align: center;
+            }
+
+                .slide-title::after {
+                    left: 50%;
+                    transform: translateX(-50%);
+                }
+
+            .slide-content {
+                font-size: 1rem;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+
+            .slide-image-container {
+                max-width: 100%;
+            }
+
+            .slide-image {
+                max-height: 300px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .interactive-slide {
+                width: 95vw;
+                height: 80vh;
+                padding: 20px;
+                margin-top: 5vh;
+            }
+
+            .slide-title {
+                font-size: 1.4rem;
+                margin-bottom: 15px;
+            }
+
+            .slide-content {
+                font-size: 0.95rem;
+                margin-bottom: 15px;
+            }
+
+            .slide-image {
+                max-height: 250px;
+                margin: 10px 0;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .interactive-slide {
+                width: 98vw;
+                height: 85vh;
+                padding: 15px;
+            }
+
+            .slide-title {
+                font-size: 1.2rem;
+                margin-bottom: 10px;
+            }
+
+            .slide-content {
+                font-size: 0.9rem;
+                margin-bottom: 10px;
+            }
+
+            .slide-image {
+                max-height: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            {{slides}}
+        </div>
+    </div>
+
+    <!-- Include required scripts -->
+    <script src="https://unpkg.com/reveal.js/dist/reveal.js"></script>
+    <script src="https://unpkg.com/reveal.js/plugin/highlight/highlight.js"></script>
+    <script src="https://unpkg.com/reveal.js/plugin/math/math.js"></script>
+    <script src="https://unpkg.com/reveal.js/plugin/notes/notes.js"></script>
+    <script src="https://unpkg.com/reveal.js/plugin/zoom/zoom.js"></script>
+
+    <script>
+        // Initialize Reveal.js with enhanced features
+        Reveal.initialize({
+            width: 1920,
+            height: 1080,
+            controls: true,
+            progress: true,
+            history: true,
+            center: false,
+            help: true,
+            transition: 'convex',
+            transitionSpeed: 'default',
+            backgroundTransition: 'fade',
+
+            // Enable plugins
+            plugins: [
+                RevealHighlight,
+                RevealMath,
+                RevealNotes,
+                RevealZoom
+            ],
+
+            // Math configuration
+            math: {
+                mathjax: 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js',
+                config: 'TeX-AMS_HTML-full'
+            },
+
+            // Highlight.js configuration
+            highlight: {
+                highlightOnLoad: true
+            }
+        });
+
+        // Add interactive features
+        Reveal.addEventListener('ready', function (event) {
+            // Add click handlers for interactive images
+            const images = document.querySelectorAll('.slide-image');
+            images.forEach(function (img, index) {
+                img.onclick = function () {
+                    // Add zoom effect or image cycling functionality
+                    img.style.transform = img.style.transform === 'scale(1.1)' ? 'scale(1)' : 'scale(1.1)';
+                };
+            });
+
+            // Add keyboard shortcuts
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'h' || e.key === 'H') {
+                    // Toggle help overlay
+                    Reveal.toggleHelp();
+                }
+            });
+        });
+
+        // Add custom navigation
+        Reveal.addEventListener('slidechanged', function (event) {
+            // Update any slide-specific functionality
+            console.log('Slide changed:', event.indexh, event.indexv);
+        });
+    </script>
+</body>
+</html>

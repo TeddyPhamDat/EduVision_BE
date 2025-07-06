@@ -53,6 +53,24 @@ namespace EduVision.Services.Presentation
                         slideHtml.AppendLine("</section>");
                         break;
 
+                    case "Template_1.html":
+                        slideHtml.AppendLine("<section>");
+                        slideHtml.AppendLine("<div class=\"interactive-slide\">");
+                        // Left side - Text content
+                        slideHtml.AppendLine("<div class=\"slide-text-content\">");
+                        slideHtml.AppendLine($"<h1 class=\"slide-title\">{slide.Title}</h1>");
+                        slideHtml.AppendLine($"<div class=\"slide-content\">{slide.Content}</div>");
+                        slideHtml.AppendLine("</div>");
+                        // Right side - Image (only if image exists)
+                        if (!string.IsNullOrEmpty(slide.ImageUrl))
+                        {
+                            slideHtml.AppendLine("<div class=\"slide-image-container\">");
+                            slideHtml.AppendLine($"<img class=\"slide-image\" src=\"{slide.ImageUrl}\" alt=\"Slide image\" />");
+                            slideHtml.AppendLine("</div>");
+                        }
+                        slideHtml.AppendLine("</div>");
+                        slideHtml.AppendLine("</section>");
+                        break;
 
                     case "RevealTemplate.html":
                         slideHtml.AppendLine("<section>");
@@ -75,7 +93,7 @@ namespace EduVision.Services.Presentation
                         slideHtml.AppendLine("</section>");
                         break;
 
-                    default: 
+                    default:
                         slideHtml.AppendLine("<section>");
                         if (!string.IsNullOrEmpty(slide.ImageUrl))
                             slideHtml.AppendLine($"<img class=\"slide-image\" src=\"{slide.ImageUrl}\" style=\"max-height: 320px; display:block; margin:auto;\"/>");

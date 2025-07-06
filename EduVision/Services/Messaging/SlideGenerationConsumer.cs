@@ -227,6 +227,7 @@ namespace EduVision.Services.Messaging
                     2 => "RevealTemplateDark.html",
                     3 => "RevealTemplateModern.html",
                     1 => "RevealTemplate.html",
+                    4 => "Template_1.html",
                     _ => "RevealTemplateDark.html"
                 };
                 
