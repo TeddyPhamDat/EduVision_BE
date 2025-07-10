@@ -13,15 +13,15 @@ namespace EduVision.Controllers
     // API convention: Use plural, hyphenated nouns for resource URIs (e.g., /api/blob-images).
     [Authorize(Roles = "MANAGER")]
     [ApiController]
-    [Route("api/blob-images")]
-    public class BlobImageController : ControllerBase
+    [Route("api/images")]
+    public class ImageController : ControllerBase
     {
         private readonly IImageStorageService _imageStorage;
         private readonly EduVisionContext _dbContext;
 
         // Constructor injects the image storage abstraction and database context.
         // Why: Follows SOLID principles and allows for easy backend replacement.
-        public BlobImageController(IImageStorageService imageStorage, EduVisionContext dbContext)
+        public ImageController(IImageStorageService imageStorage, EduVisionContext dbContext)
         {
             _imageStorage = imageStorage;
             _dbContext = dbContext;

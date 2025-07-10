@@ -7,6 +7,6 @@ namespace EduVision.Services.Data
     {
         Task<User> GetUserByIdAsync(int userId);
         Task<User> UpdateUserAsync(User user);
-        // Thêm các phương thức khác nếu cần
+        Task<bool> DeleteUserAsync(int userId);
     }
 } 
