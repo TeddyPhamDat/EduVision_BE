@@ -129,5 +129,66 @@ namespace EduVision.Services.Data
 
     return history;
 }
+
+        public async Task UpdateQuotaAsync(int userId, string quotaType, int amount)
+        {
+            var now = DateTime.UtcNow;
+            var currentMonthStart = new DateTime(now.Year, now.Month, 1);
+            var periodEnd = currentMonthStart.AddMonths(1).AddDays(-1);
+
+            var userQuota = await _context.UserQuota
+                .FirstOrDefaultAsync(q =>
+                    q.UserId == userId &&
+                    q.QuotaType == quotaType &&
+                    q.PeriodStart == currentMonthStart);
+
+            if (userQuota == null)
+            {
+                userQuota = new UserQuotum
+                {
+                    UserId = userId,
+                    QuotaType = quotaType,
+                    QuotaLimit = amount,
+                    QuotaUsed = 0,
+                    PeriodStart = currentMonthStart,
+                    PeriodEnd = periodEnd,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+                _context.UserQuota.Add(userQuota);
+            }
+            else
+            {
+                userQuota.QuotaLimit = amount; // Set new limit
+                userQuota.UpdatedAt = now;
+                _context.UserQuota.Update(userQuota);
+            }
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task<QuotaSummaryResponse> GetQuotaSummaryAsync(int userId)
+        {
+            var now = DateTime.UtcNow;
+            var currentMonthStart = new DateTime(now.Year, now.Month, 1);
+            var periodEnd = currentMonthStart.AddMonths(1).AddDays(-1);
+
+            var videoQuota = await _context.UserQuota
+                .FirstOrDefaultAsync(q => q.UserId == userId && q.QuotaType == "video" && q.PeriodStart == currentMonthStart);
+
+            var slideQuota = await _context.UserQuota
+                .FirstOrDefaultAsync(q => q.UserId == userId && q.QuotaType == "slides" && q.PeriodStart == currentMonthStart);
+
+            return new QuotaSummaryResponse
+            {
+                VideoQuotaLimit = videoQuota?.QuotaLimit ?? 0,
+                VideoQuotaUsed = videoQuota?.QuotaUsed ?? 0,
+                VideoQuotaRemaining = (videoQuota?.QuotaLimit ?? 0) - (videoQuota?.QuotaUsed ?? 0),
+                SlideQuotaLimit = slideQuota?.QuotaLimit ?? 0,
+                SlideQuotaUsed = slideQuota?.QuotaUsed ?? 0,
+                SlideQuotaRemaining = (slideQuota?.QuotaLimit ?? 0) - (slideQuota?.QuotaUsed ?? 0),
+                PeriodStart = currentMonthStart,
+                PeriodEnd = periodEnd
+            };
+        }
     }
 }

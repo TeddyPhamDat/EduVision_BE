@@ -10,6 +10,7 @@ namespace EduVision.Services.Data
         Task<List<QuotaHistoryResponse>> GetQuotaHistoryAsync(int userId);
 
         Task IncreaseQuotaAsync(int userId, decimal amount); // amount là số tiền nạp vào
-      
+        Task<EduVision.Models.DTO.Response.QuotaSummaryResponse> GetQuotaSummaryAsync(int userId);
+        Task UpdateQuotaAsync(int userId, string quotaType, int amount);// amount là số lượng quota mà admin cập nhật
     }
 }
