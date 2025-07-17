@@ -22,21 +22,24 @@ namespace EduVision.Controllers
         private readonly ILogger<AdminController> _logger;
         private readonly IQuotaService _quotaService;
         private readonly IUserService _userService;
+        private readonly IDashboardService _dashboardService;
 
         public AdminController(
             EduVisionContext dbContext,
             ILogger<AdminController> logger,
             IQuotaService quotaService,
-            IUserService userService)
+            IUserService userService,
+            IDashboardService dashboardService)
         {
             _dbContext = dbContext;
             _logger = logger;
             _quotaService = quotaService;
             _userService = userService;
+            _dashboardService = dashboardService;
         }
 
         /// <summary>
-        /// Get users with basic filtering and pagination.
+        /// Get all users with option for paging, searching by role or email/FullName.
         /// </summary>
         [HttpGet("users")]
         public async Task<IActionResult> GetUsers(
@@ -48,47 +51,9 @@ namespace EduVision.Controllers
             if (page < 1) page = 1;
             if (pageSize < 1 || pageSize > 100) pageSize = 20;
 
-            var query = _dbContext.Users.AsQueryable();
-
-            if (!string.IsNullOrEmpty(search))
-            {
-                query = query.Where(u => 
-                    u.FullName.Contains(search) || 
-                    u.Email.Contains(search));
-            }
-
-            if (!string.IsNullOrEmpty(role) && Enum.TryParse<Role>(role, true, out var roleEnum))
-            {
-                query = query.Where(u => u.Role == (int)roleEnum);
-            }
-
-            var totalCount = await query.CountAsync();
-            var users = await query
-                .OrderByDescending(u => u.UserId)
-                .Skip((page - 1) * pageSize)
-                .Take(pageSize)
-                .Select(u => new
-                {
-                    u.UserId,
-                    u.FullName,
-                    u.Email,
-                    u.IsVerified,
-                    u.IsActive,
-                    u.CreatedAt,
-                    Role = ((Role)u.Role).ToString()
-                })
-                .ToListAsync();
-
-            var response = new PaginatedResponse<object>
-            {
-                Data = users.Cast<object>().ToList(),
-                Page = page,
-                PageSize = pageSize,
-                TotalCount = totalCount,
-                TotalPages = (int)Math.Ceiling((double)totalCount / pageSize)
-            };
-
-            return Ok(ApiResponse<PaginatedResponse<object>>.Success(response));
+            var result = await _userService.GetUsersAsync(page, pageSize, search, role);
+            
+            return Ok(ApiResponse<PaginatedResponse<AdminUserResponse>>.Success(result));
         }
 
         /// <summary>
@@ -191,7 +156,6 @@ namespace EduVision.Controllers
         {
             try
             {
-
                 var user = await _userService.GetUserByIdAsync(userId);
                 if (user == null)
                 {
@@ -230,100 +194,23 @@ namespace EduVision.Controllers
         }
 
         /// <summary>
-        /// Get user status and deletion preview information.
+        /// Get comprehensive user statistics for admin dashboard.
         /// </summary>
-        [HttpGet("users/{userId:int}/status")]
-        public async Task<IActionResult> GetUserStatus(int userId)
+        [HttpGet("dashboard/users")]
+        public async Task<IActionResult> GetUserStats()
         {
-            try
-            {
-                var user = await _dbContext.Users
-                    .Include(u => u.UserQuota)
-                    .Include(u => u.Payments)
-                    .Include(u => u.Slides)
-                    .Include(u => u.GeneratedVideos)
-                    .Where(u => u.UserId == userId)
-                    .FirstOrDefaultAsync();
-
-                if (user == null)
-                    return NotFound(ApiResponse<string>.Fail("User not found", 404));
-
-                var statusInfo = new
-                {
-                    User = new
-                    {
-                        user.UserId,
-                        user.FullName,
-                        user.Email,
-                        user.IsActive,
-                        user.IsVerified,
-                        user.CreatedAt,
-                        Role = ((Role)user.Role).ToString()
-                    },
-                    UserData = new
-                    {
-                        SlidesCount = user.Slides.Count(),
-                        VideosCount = user.GeneratedVideos.Count(),
-                        PaymentsCount = user.Payments.Count(),
-                        QuotaRecordsCount = user.UserQuota.Count(),
-                        TotalPaymentAmount = user.Payments.Where(p => p.Status == "success").Sum(p => p.Amount ?? 0)
-                    },
-                    CanDeactivate = user.IsActive == true && (Role)user.Role != Role.ADMIN,
-                    CanReactivate = user.IsActive == false,
-                    Note = user.IsActive == false ? "User is currently deactivated. All data is preserved." : "User is currently active."
-                };
-
-                return Ok(ApiResponse<object>.Success(statusInfo));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error fetching user status for userId: {UserId}", userId);
-                return StatusCode(500, ApiResponse<string>.Fail($"Failed to fetch user status: {ex.Message}", 500));
-            }
+            var userStats = await _dashboardService.GetUserStatsAsync();
+            return Ok(ApiResponse<UserStatsResponse>.Success(userStats));
         }
 
         /// <summary>
-        /// Get recent payments for monitoring.
+        /// Get comprehensive content generation statistics (videos and slides) for admin dashboard.
         /// </summary>
-        [HttpGet("payments")]
-        public async Task<IActionResult> GetRecentPayments([FromQuery] int days = 7)
+        [HttpGet("dashboard/content-generation")]
+        public async Task<IActionResult> GetContentGenerationStats()
         {
-            var payments = await _dbContext.Payments
-                .Include(p => p.User)
-                .Where(p => p.CreatedAt >= DateTime.UtcNow.AddDays(-days))
-                .OrderByDescending(p => p.CreatedAt)
-                .Take(50)
-                .Select(p => new
-                {
-                    p.PaymentId,
-                    p.OrderCode,
-                    p.Amount,
-                    p.Status,
-                    p.CreatedAt,
-                    UserEmail = p.User.Email
-                })
-                .ToListAsync();
-
-            return Ok(ApiResponse<object>.Success(payments));
-        }
-
-        /// <summary>
-        /// Simple admin dashboard stats.
-        /// </summary>
-        [HttpGet("dashboard")]
-        public async Task<IActionResult> GetDashboard()
-        {
-            var stats = new
-            {
-                TotalUsers = await _dbContext.Users.CountAsync(),
-                ActiveUsers = await _dbContext.Users.CountAsync(u => u.IsActive == true),
-                PendingPayments = await _dbContext.Payments.CountAsync(p => p.Status == "pending"),
-                TodaysRevenue = await _dbContext.Payments
-                    .Where(p => p.Status == "success" && p.CreatedAt.Value.Date == DateTime.UtcNow.Date)
-                    .SumAsync(p => p.Amount ?? 0)
-            };
-
-            return Ok(ApiResponse<object>.Success(stats));
+            var contentStats = await _dashboardService.GetContentGenerationStatsAsync();
+            return Ok(ApiResponse<ContentGenerationStatsResponse>.Success(contentStats));
         }
     }
 }

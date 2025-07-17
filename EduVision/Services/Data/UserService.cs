@@ -1,5 +1,7 @@
 using EduVision.DBContext;
 using EduVision.Models;
+using EduVision.Models.DTO.Response;
+using EduVision.Models.Entities.Enum;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.Tasks;
 using System.Linq;
@@ -48,6 +50,53 @@ namespace EduVision.Services.Data
 
             await _context.SaveChangesAsync();
             return true;
+        }
+
+        public async Task<PaginatedResponse<AdminUserResponse>> GetUsersAsync(int page, int pageSize, string? search = null, string? role = null)
+        {
+            var query = _context.Users.AsQueryable();
+
+            // Apply search filter - search by name or email
+            if (!string.IsNullOrEmpty(search))
+            {
+                query = query.Where(u => 
+                    u.FullName.Contains(search) || 
+                    u.Email.Contains(search));
+            }
+
+            // Apply role filter
+            if (!string.IsNullOrEmpty(role) && Enum.TryParse<Role>(role, true, out var roleEnum))
+            {
+                query = query.Where(u => u.Role == (int)roleEnum);
+            }
+
+            var totalCount = await query.CountAsync();
+            
+            // Order by UserId in descending order (newest first)
+            var users = await query
+                .OrderByDescending(u => u.UserId)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(u => new AdminUserResponse
+                {
+                    UserId = u.UserId,
+                    FullName = u.FullName,
+                    Email = u.Email,
+                    IsVerified = u.IsVerified,
+                    IsActive = u.IsActive,
+                    CreatedAt = u.CreatedAt,
+                    Role = ((Role)u.Role).ToString()
+                })
+                .ToListAsync();
+
+            return new PaginatedResponse<AdminUserResponse>
+            {
+                Data = users,
+                Page = page,
+                PageSize = pageSize,
+                TotalCount = totalCount,
+                TotalPages = (int)Math.Ceiling((double)totalCount / pageSize)
+            };
         }
     }
 }
