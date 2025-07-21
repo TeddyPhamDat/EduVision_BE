@@ -20,8 +20,6 @@ using Xabe.FFmpeg;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Set the FFmpeg executables path so that video/audio processing features can find the required binaries.
-
 // Register all required services for the application, including controllers, Swagger, authentication, and custom services.
 builder.Services.AddControllers();
 

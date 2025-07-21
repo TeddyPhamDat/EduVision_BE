@@ -16,6 +16,5 @@ namespace EduVision.Models.DTO.Request
         
         public int Template { get; set; } = 1; // 1=default, 2=dark, 3=modern
 
-        public string Mode { get; set; } = "slides"; // "slides" or "video"
     }
 }

@@ -1,5 +1,6 @@
 using EduVision.DBContext;
 using EduVision.Models;
+using EduVision.Models.Constants; // Add this
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
 using EduVision.Models.Entities.Enum;
@@ -20,18 +21,15 @@ namespace EduVision.Controllers
     public class SlidesController : ControllerBase
     {
         private readonly EduVisionContext _dbContext;
-        private readonly ILogger<SlidesController> _logger;
         private readonly IQuotaService _quotaService;
         private readonly KafkaProducerService _kafkaProducerService;
 
         public SlidesController(
             EduVisionContext dbContext,
-            ILogger<SlidesController> logger,
             IQuotaService quotaService,
             KafkaProducerService kafkaProducerService)
         {
             _dbContext = dbContext;
-            _logger = logger;
             _quotaService = quotaService;
             _kafkaProducerService = kafkaProducerService;
         }
@@ -41,35 +39,36 @@ namespace EduVision.Controllers
         /// </summary>
         [Authorize(Roles = "USER,MANAGER,ADMIN")]
         [HttpPost]
-        [ProducesResponseType(typeof(ApiResponse<int>), 202)]
+        [ProducesResponseType(typeof(ApiResponse<int>), HttpStatusCodes.Accepted)]
         public async Task<ActionResult> CreateSlides([FromBody] EducationRequestDto request)
         {
-            var userId = await GetAuthenticatedUserIdAsync();
+            var userId = GetAuthenticatedUserId(); 
             if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+                return Unauthorized(ApiResponse<string>.Fail(ErrorMessages.Auth.UserIdNotFound, HttpStatusCodes.Unauthorized));
 
             var user = await _dbContext.Users.FindAsync(userId.Value);
             if (user == null)
-                return NotFound(ApiResponse<string>.Fail("User does not exist", 404));
+                return NotFound(ApiResponse<string>.Fail(ErrorMessages.Auth.UserDoesNotExist, HttpStatusCodes.NotFound));
 
             // Check quota for non-managers
             if ((Role)user.Role != Role.MANAGER)
             {
-                bool hasQuota = await _quotaService.CheckQuotaAsync(userId.Value, "slides");
+                bool hasQuota = await _quotaService.CheckQuotaAsync(userId.Value, QuotaTypes.Slides);
                 if (!hasQuota)
-                    return StatusCode(403, ApiResponse<string>.Fail("You have exceeded the number of slide generations for the month", 403));
+                    return StatusCode(HttpStatusCodes.Forbidden, 
+                        ApiResponse<string>.Fail(ErrorMessages.Quota.SlideQuotaExceeded, HttpStatusCodes.Forbidden));
             }
 
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
-                return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
+                return BadRequest(ApiResponse<string>.Fail(ErrorMessages.Validation.SubjectAndChapterRequired, HttpStatusCodes.BadRequest));
 
             // Create database entry with "Processing" status
             var promptEntity = new Prompt
             {
                 UserId = userId.Value,
-                Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - slides",
+                Content = CreatePromptContent(request, "slides"),
                 CreatedAt = DateTime.UtcNow,
-                Status = "Processing"
+                Status = StatusConstants.ProcessingStatus.Processing
             };
             _dbContext.Prompts.Add(promptEntity);
             await _dbContext.SaveChangesAsync();
@@ -86,13 +85,13 @@ namespace EduVision.Controllers
             var notification = new Notification
             {
                 UserId = userId.Value,
-                Message = "Your slide generation request has been submitted and is being processed.",
+                Message = SuccessMessages.Slides.GenerationSubmitted,
                 CreatedAt = DateTime.UtcNow
             };
             _dbContext.Notifications.Add(notification);
             await _dbContext.SaveChangesAsync();
 
-            return Accepted(ApiResponse<int>.Success(promptEntity.Promptid, "Slide generation request accepted and is being processed."));
+            return Accepted(ApiResponse<int>.Success(promptEntity.Promptid, SuccessMessages.Slides.GenerationAccepted));
         }
 
         /// <summary>
@@ -101,17 +100,17 @@ namespace EduVision.Controllers
         [Authorize]
         [HttpGet]
         public async Task<IActionResult> GetMySlides(
-            [FromQuery] int page = 1, 
-            [FromQuery] int pageSize = 10,
+            [FromQuery] int page = ServiceConstants.Pagination.MinPage, 
+            [FromQuery] int pageSize = ServiceConstants.Pagination.DefaultPageSize,
             [FromQuery] string? status = null)
         {
-            var userId = await GetAuthenticatedUserIdAsync();
+            var userId = GetAuthenticatedUserId();
             if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+                return Unauthorized(ApiResponse<string>.Fail(ErrorMessages.Auth.UserIdNotFound, HttpStatusCodes.Unauthorized));
 
             // Validate pagination
-            if (page < 1) page = 1;
-            if (pageSize < 1 || pageSize > 100) pageSize = 10;
+            page = ValidatePage(page);
+            pageSize = ValidatePageSize(pageSize);
 
             var query = _dbContext.Slides
                 .Include(s => s.Prompt)
@@ -135,7 +134,7 @@ namespace EduVision.Controllers
                 Type = s.Type,
                 Url = s.Url,
                 Status = s.Status,
-                PromptContent = s.Prompt?.Content
+                PromptContent = s.Prompt.Content
             }).ToList();
 
             var paginatedResponse = new PaginatedResponse<SlideResponse>
@@ -150,68 +149,33 @@ namespace EduVision.Controllers
             return Ok(ApiResponse<PaginatedResponse<SlideResponse>>.Success(paginatedResponse));
         }
 
-        /// <summary>
-        /// Get a specific slide by ID.
-        /// </summary>
-        [Authorize]
-        [HttpGet("{slideId:int}")]
-        public async Task<IActionResult> GetSlide(int slideId)
-        {
-            var userId = await GetAuthenticatedUserIdAsync();
-            if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+        #region Private Helper Methods
 
-            var slide = await _dbContext.Slides
-                .Include(s => s.Prompt)
-                .Where(s => s.SlideId == slideId && s.UserId == userId.Value)
-                .FirstOrDefaultAsync();
-
-            if (slide == null)
-                return NotFound(ApiResponse<string>.Fail("Slide not found", 404));
-
-            var response = new SlideResponse
-            {
-                SlideId = slide.SlideId,
-                PromptId = slide.PromptId,
-                Type = slide.Type,
-                Url = slide.Url,
-                Status = slide.Status,
-                PromptContent = slide.Prompt?.Content
-            };
-
-            return Ok(ApiResponse<SlideResponse>.Success(response));
-        }
-
-        /// <summary>
-        /// Get the status of a specific slide.
-        /// </summary>
-        [Authorize]
-        [HttpGet("{slideId:int}/status")]
-        public async Task<IActionResult> GetSlideStatus(int slideId)
-        {
-            var userId = await GetAuthenticatedUserIdAsync();
-            if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
-
-            var slide = await _dbContext.Slides
-                .Where(s => s.SlideId == slideId && s.UserId == userId.Value)
-                .FirstOrDefaultAsync();
-
-            if (slide == null)
-                return NotFound(ApiResponse<string>.Fail("Slide not found", 404));
-
-            return Ok(ApiResponse<object>.Success(new {
-                Status = slide.Status,
-                Url = slide.Url ?? ""
-            }, "Slide status retrieved successfully"));
-        }
-
-        private async Task<int?> GetAuthenticatedUserIdAsync()
+        private int? GetAuthenticatedUserId()
         {
             var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
                 return null;
             return userId;
         }
+
+        private static string CreatePromptContent(EducationRequestDto request, string type)
+        {
+            return $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {type}";
+        }
+
+        private static int ValidatePage(int page)
+        {
+            return page < ServiceConstants.Pagination.MinPage ? ServiceConstants.Pagination.MinPage : page;
+        }
+
+        private static int ValidatePageSize(int pageSize)
+        {
+            if (pageSize < 1 || pageSize > ServiceConstants.Pagination.MaxPageSize)
+                return ServiceConstants.Pagination.DefaultPageSize;
+            return pageSize;
+        }
+
+        #endregion
     }
 }

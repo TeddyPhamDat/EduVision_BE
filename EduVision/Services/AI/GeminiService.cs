@@ -6,6 +6,7 @@ using System.Text.Json;
 using EduVision.Models.Config;
 using EduVision.Models.DTO;
 using EduVision.Services.Data;
+using EduVision.Models.Constants;
 
 namespace EduVision.Services.AI
 {
@@ -66,10 +67,10 @@ namespace EduVision.Services.AI
                     content.Length, subject, chapter, grade);
 
                 string trimmedContent = content;
-                if (content.Length > 8000)
+                if (content.Length > ServiceConstants.Gemini.MaxContentLength)
                 {
-                    trimmedContent = content.Substring(0, 8000) + "... (content truncated due to length)";
-                    _logger.LogInformation("Content truncated from {OriginalLength} to 8000 characters", content.Length);
+                    trimmedContent = content.Substring(0, ServiceConstants.Gemini.MaxContentLength) + "... (content truncated due to length)";
+                    _logger.LogInformation("Content truncated from {OriginalLength} to {MaxContentLength} characters", content.Length, ServiceConstants.Gemini.MaxContentLength);
                 }
 
                 string title = metadata?.Title ?? chapter;
@@ -127,9 +128,9 @@ namespace EduVision.Services.AI
 
             var endpoint = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
 
-            const int maxRetries = 10;
+            const int maxRetries = ServiceConstants.Gemini.MaxRetries;
             int retryCount = 0;
-            int delayMs = 1000;
+            int delayMs = ServiceConstants.Gemini.InitialDelayMs;
 
             HttpResponseMessage response = null!;
             string responseBody = string.Empty;
@@ -146,34 +147,34 @@ namespace EduVision.Services.AI
                         break;
                     }
 
-                    if ((int)response.StatusCode == 401)
+                    if ((int)response.StatusCode == HttpStatusCodes.Unauthorized)
                     {
                         _logger.LogError("Unauthorized: Invalid API key.");
                         return new SlideGenerationResultDto
                         {
                             ErrorCode = "Unauthorized",
                             ErrorMessage = "Invalid API key.",
-                            HttpStatusCode = 401
+                            HttpStatusCode = HttpStatusCodes.Unauthorized
                         };
                     }
-                    if ((int)response.StatusCode == 403)
+                    if ((int)response.StatusCode == HttpStatusCodes.Forbidden)
                     {
                         _logger.LogError("Forbidden: Access denied.");
                         return new SlideGenerationResultDto
                         {
                             ErrorCode = "Forbidden",
                             ErrorMessage = "Access denied.",
-                            HttpStatusCode = 403
+                            HttpStatusCode = HttpStatusCodes.Forbidden
                         };
                     }
-                    if ((int)response.StatusCode == 429)
+                    if ((int)response.StatusCode == HttpStatusCodes.TooManyRequests)
                     {
                         _logger.LogError("Too Many Requests: Rate limit exceeded.");
                         return new SlideGenerationResultDto
                         {
                             ErrorCode = "RateLimitExceeded",
                             ErrorMessage = "Rate limit exceeded.",
-                            HttpStatusCode = 429
+                            HttpStatusCode = HttpStatusCodes.TooManyRequests
                         };
                     }
                     if ((int)response.StatusCode == 503)
@@ -232,14 +233,14 @@ namespace EduVision.Services.AI
                     if (text != null)
                     {
                         text = text.Trim();
-                        if (text.StartsWith("```"))
+                        if (text.StartsWith(ServiceConstants.Gemini.CodeBlockMarker))
                         {
                             var firstNewline = text.IndexOf('\n');
                             if (firstNewline >= 0)
                             {
                                 text = text.Substring(firstNewline + 1);
                             }
-                            if (text.EndsWith("```"))
+                            if (text.EndsWith(ServiceConstants.Gemini.CodeBlockMarker))
                             {
                                 text = text.Substring(0, text.Length - 3);
                             }
@@ -251,12 +252,12 @@ namespace EduVision.Services.AI
                     {
                         // Remove code block markers if present
                         text = text.Trim();
-                        if (text.StartsWith("```"))
+                        if (text.StartsWith(ServiceConstants.Gemini.CodeBlockMarker))
                         {
                             var firstNewline = text.IndexOf('\n');
                             if (firstNewline >= 0)
                                 text = text.Substring(firstNewline + 1);
-                            if (text.EndsWith("```"))
+                            if (text.EndsWith(ServiceConstants.Gemini.CodeBlockMarker))
                                 text = text.Substring(0, text.Length - 3);
                             text = text.Trim();
                         }
@@ -274,7 +275,7 @@ namespace EduVision.Services.AI
                                 {
                                     ErrorCode = "Success",
                                     Slides = slides ?? new List<LessonSlideDto>(),
-                                    HttpStatusCode = 200
+                                    HttpStatusCode = HttpStatusCodes.Ok
                                 };
                             }
                             catch (Exception ex)

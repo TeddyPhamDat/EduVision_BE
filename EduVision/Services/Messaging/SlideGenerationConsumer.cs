@@ -1,7 +1,7 @@
 using Confluent.Kafka;
-using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.Config;
+using EduVision.Models.Constants;
 using EduVision.Models.DTO.Request;
 using EduVision.Services.AI;
 using EduVision.Services.Data;
@@ -46,18 +46,18 @@ namespace EduVision.Services.Messaging
                 {
                     if (_connectionAttempted)
                     {
-                        await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                        await Task.Delay(TimeSpan.FromMinutes(ServiceConstants.Kafka.RetryDelayMinutes), stoppingToken);
                     }
                     _connectionAttempted = true;
 
                     var config = new ConsumerConfig
                     {
                         BootstrapServers = _kafkaConfig.BootstrapServers,
-                        GroupId = "slide-generation-group-dev2",
+                        GroupId = ServiceConstants.Kafka.SlideGroupId, 
                         AutoOffsetReset = AutoOffsetReset.Earliest,
-                        EnableAutoCommit = false, // Manual commit
-                        SessionTimeoutMs = 10000,
-                        SocketTimeoutMs = 10000,
+                        EnableAutoCommit = false, 
+                        SessionTimeoutMs = ServiceConstants.Kafka.SessionTimeoutMs,
+                        SocketTimeoutMs = ServiceConstants.Kafka.SocketTimeoutMs,
                     };
 
                     if (!string.IsNullOrEmpty(_kafkaConfig.SaslUsername) && !string.IsNullOrEmpty(_kafkaConfig.SaslPassword))
@@ -72,7 +72,7 @@ namespace EduVision.Services.Messaging
 
                     try
                     {
-                        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(ServiceConstants.Kafka.ConnectionTimeoutSeconds));
                         var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, stoppingToken);
 
                         consumer.Subscribe(_kafkaConfig.SlideGenerationTopic);
@@ -83,7 +83,7 @@ namespace EduVision.Services.Messaging
                         {
                             try
                             {
-                                var result = consumer.Consume(TimeSpan.FromSeconds(1));
+                                var result = consumer.Consume(TimeSpan.FromSeconds(ServiceConstants.Kafka.ConsumeTimeoutSeconds));
                                 if (result == null) continue;
 
                                 _logger.LogInformation("Raw Kafka message: {Value}", result.Message.Value);
@@ -118,7 +118,7 @@ namespace EduVision.Services.Messaging
                             catch (Exception ex)
                             {
                                 _logger.LogError(ex, "Error in message consumption loop");
-                                await Task.Delay(1000, stoppingToken);
+                                await Task.Delay(ServiceConstants.Kafka.MessageDelayMs, stoppingToken);
                             }
                         }
                     }
@@ -142,7 +142,7 @@ namespace EduVision.Services.Messaging
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error in Kafka consumer. Will retry connection in 1 minute.");
-                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
+                    await Task.Delay(TimeSpan.FromMinutes(ServiceConstants.Kafka.RetryDelayMinutes), stoppingToken);
                 }
             }
 
@@ -180,22 +180,24 @@ namespace EduVision.Services.Messaging
                 // Generate slides
                 var slideResult = await geminiService.GenerateEducationSlidesAsync(request.Subject, request.Chapter, request.Grade);
 
-                if (slideResult == null || slideResult.HttpStatusCode != 200 || slideResult.Slides == null || slideResult.Slides.Count == 0)
+                if (slideResult == null || slideResult.HttpStatusCode != HttpStatusCodes.Ok || slideResult.Slides == null || slideResult.Slides.Count == 0)
                 {
                     logger.LogError("Failed to generate slides for UserId: {UserId}, Reason: {Reason}", userId, slideResult?.ErrorMessage);
                     
                     if (generateVideo)
                     {
-                        await UpdateFailedStatus(dbContext, userId, request, "Failed to generate slides");
+                        await UpdateFailedStatus(dbContext, userId, request, ErrorMessages.Processing.FailedToGenerateSlides);
                     }
                     
-                    prompt.Status = "Failed";
+                    prompt.Status = StatusConstants.ProcessingStatus.Failed;
                     await dbContext.SaveChangesAsync();
                     return;
                 }
 
                 // Assign images
-                var imageCategory = string.IsNullOrEmpty(request.ImageCategory) ? "education" : request.ImageCategory;
+                var imageCategory = string.IsNullOrEmpty(request.ImageCategory) 
+                    ? ServiceConstants.Presentation.DefaultImageCategory 
+                    : request.ImageCategory;
                 var imageUrls = await slideImageSelector.GetBestImagesForSlidesAsync(
                     imageCategory,
                     request.Grade,
@@ -209,10 +211,10 @@ namespace EduVision.Services.Messaging
                     
                     if (generateVideo)
                     {
-                        await UpdateFailedStatus(dbContext, userId, request, "Not enough images found");
+                        await UpdateFailedStatus(dbContext, userId, request, ErrorMessages.Processing.NotEnoughImages);
                     }
                     
-                    prompt.Status = "Failed";
+                    prompt.Status = StatusConstants.ProcessingStatus.Failed;
                     await dbContext.SaveChangesAsync();
                     return;
                 }
@@ -222,14 +224,7 @@ namespace EduVision.Services.Messaging
 
                 // Generate HTML
                 var lessonId = Guid.NewGuid().ToString("N");
-                string templateName = request.Template switch
-                {
-                    2 => "RevealTemplateDark.html",
-                    3 => "RevealTemplateModern.html",
-                    1 => "RevealTemplate.html",
-                    4 => "Template_1.html",
-                    _ => "RevealTemplateDark.html"
-                };
+                string templateName = TemplateConstants.GetTemplateFileName(request.Template);
                 
                 var slideUrl = await revealJsGenerator.GenerateRevealHtmlAsync(slideResult.Slides, lessonId, templateName);
 
@@ -242,7 +237,7 @@ namespace EduVision.Services.Messaging
                     {
                         // For video generation, find the existing "Processing" prompt
                         var existingPrompt = await dbContext.Prompts
-                            .Where(p => p.UserId == userId && p.Status == "Processing")
+                            .Where(p => p.UserId == userId && p.Status == StatusConstants.ProcessingStatus.Processing)
                             .OrderByDescending(p => p.CreatedAt)
                             .FirstOrDefaultAsync();
 
@@ -269,9 +264,9 @@ namespace EduVision.Services.Messaging
                             var promptEntity = new Prompt
                             {
                                 UserId = userId,
-                                Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - video",
+                                Content = CreatePromptContent(request, QuotaTypes.Video),
                                 CreatedAt = DateTime.UtcNow,
-                                Status = "Processing"
+                                Status = StatusConstants.ProcessingStatus.Processing
                             };
                             dbContext.Prompts.Add(promptEntity);
                             await dbContext.SaveChangesAsync();
@@ -284,7 +279,7 @@ namespace EduVision.Services.Messaging
                                 UserId = userId,
                                 Type = request.Subject,
                                 Url = slideUrl ?? "",
-                                Status = "Processing"
+                                Status = StatusConstants.ProcessingStatus.Processing
                             };
                             dbContext.Slides.Add(slideEntity);
                             await dbContext.SaveChangesAsync();
@@ -296,9 +291,9 @@ namespace EduVision.Services.Messaging
                         var promptEntity = new Prompt
                         {
                             UserId = userId,
-                            Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - slides",
+                            Content = CreatePromptContent(request, QuotaTypes.Slides),
                             CreatedAt = DateTime.UtcNow,
-                            Status = "Completed"
+                            Status = StatusConstants.ProcessingStatus.Completed
                         };
                         dbContext.Prompts.Add(promptEntity);
                         await dbContext.SaveChangesAsync();
@@ -311,13 +306,13 @@ namespace EduVision.Services.Messaging
                             UserId = userId,
                             Type = request.Subject,
                             Url = slideUrl ?? "",
-                            Status = "Completed"
+                            Status = StatusConstants.ProcessingStatus.Completed
                         };
                         dbContext.Slides.Add(slideEntity);
                         await dbContext.SaveChangesAsync();
                         
                         // Increment quota for slide-only generation
-                        try { await quotaService.IncrementQuotaUsedAsync(userId, "slides"); }
+                        try { await quotaService.IncrementQuotaUsedAsync(userId, QuotaTypes.Slides); }
                         catch (Exception quotaEx) { logger.LogError(quotaEx, "Failed to update quota usage after saving slides"); }
                     }
 
@@ -338,7 +333,7 @@ namespace EduVision.Services.Messaging
                         // Generate audio narration for each slide
                         foreach (var slide in slideResult.Slides)
                         {
-                            var audioBlobName = $"presentations/{lessonId}/audio/{slideResult.Slides.IndexOf(slide)}.wav";
+                            var audioBlobName = string.Format(ServiceConstants.Audio.AudioPathTemplate, lessonId, slideResult.Slides.IndexOf(slide));
                             slide.AudioUrl = await ttsService.GenerateAudioAsync(slide.Content ?? string.Empty, audioBlobName);
                         }
 
@@ -364,7 +359,7 @@ namespace EduVision.Services.Messaging
                         // Update status to failed
                         await UpdateFailedStatus(dbContext, userId, request, $"Failed to initiate video processing: {ex.Message}");
                         
-                        prompt.Status = "Failed";
+                        prompt.Status = StatusConstants.ProcessingStatus.Failed;
                         await dbContext.SaveChangesAsync();
                     }
                 }
@@ -380,7 +375,7 @@ namespace EduVision.Services.Messaging
                 logger.LogInformation("Slide generation completed for UserId: {UserId}, GenerateVideo: {GenerateVideo}", 
                     userId, generateVideo);
                 
-                prompt.Status = "Completed";
+                prompt.Status = StatusConstants.ProcessingStatus.Completed;
                 await dbContext.SaveChangesAsync();
             }
             catch (Exception ex)
@@ -395,7 +390,7 @@ namespace EduVision.Services.Messaging
                 var prompt = await dbContext.Prompts.FindAsync(message.PromptId);
                 if (prompt != null)
                 {
-                    prompt.Status = "Failed";
+                    prompt.Status = StatusConstants.ProcessingStatus.Failed;
                     await dbContext.SaveChangesAsync();
                 }
             }
@@ -407,13 +402,13 @@ namespace EduVision.Services.Messaging
             {
                 // Find the latest processing prompt
                 var prompt = await dbContext.Prompts
-                    .Where(p => p.UserId == userId && p.Status == "Processing")
+                    .Where(p => p.UserId == userId && p.Status == StatusConstants.ProcessingStatus.Processing)
                     .OrderByDescending(p => p.CreatedAt)
                     .FirstOrDefaultAsync();
 
                 if (prompt != null)
                 {
-                    prompt.Status = "Failed";
+                    prompt.Status = StatusConstants.ProcessingStatus.Failed;
                     
                     // Find related slides and update their status
                     var slides = await dbContext.Slides
@@ -422,7 +417,7 @@ namespace EduVision.Services.Messaging
                         
                     foreach (var slide in slides)
                     {
-                        slide.Status = "Failed";
+                        slide.Status = StatusConstants.ProcessingStatus.Failed;
                     }
                     
                     // Find related video and update its status
@@ -432,7 +427,7 @@ namespace EduVision.Services.Messaging
                         
                     if (video != null)
                     {
-                        video.Status = "Failed";
+                        video.Status = StatusConstants.ProcessingStatus.Failed;
                     }
                     
                     await dbContext.SaveChangesAsync();
@@ -442,6 +437,11 @@ namespace EduVision.Services.Messaging
             {
                 _logger.LogError(ex, "Failed to update status to Failed for UserId: {UserId}", userId);
             }
+        }
+
+        private static string CreatePromptContent(EducationRequestDto request, string type)
+        {
+            return $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {type}";
         }
     }
 }

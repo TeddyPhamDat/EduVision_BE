@@ -128,7 +128,7 @@ public class AuthController : ControllerBase
 
     public class FcmTokenRequest
     {
-        public string FcmToken { get; set; }
+        public string? FcmToken { get; set; }
     }
 
 

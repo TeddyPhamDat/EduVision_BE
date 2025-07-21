@@ -2,13 +2,13 @@
 {
     public class KafkaConfig
     {
-        public string BootstrapServers { get; set; }
-        public string SlideGenerationTopic { get; set; }
-        public string VideoGenerationTopic { get; set; }
-        public string VideoResultTopic { get; set; }
-        public string SaslUsername { get; set; }
-        public string SaslPassword { get; set; }
-        public string SecurityProtocol { get; set; }
-        public string SaslMechanism { get; set; }
+        public required string BootstrapServers { get; set; }
+        public required string SlideGenerationTopic { get; set; }
+        public required string VideoGenerationTopic { get; set; }
+        public required string VideoResultTopic { get; set; }
+        public required string SaslUsername { get; set; }
+        public required string SaslPassword { get; set; }
+        public required string SecurityProtocol { get; set; }
+        public required string SaslMechanism { get; set; }
     }
 }

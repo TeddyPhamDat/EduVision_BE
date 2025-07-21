@@ -20,20 +20,17 @@ namespace EduVision.Controllers
     {
         private readonly EduVisionContext _dbContext;
         private readonly ILogger<AdminController> _logger;
-        private readonly IQuotaService _quotaService;
         private readonly IUserService _userService;
         private readonly IDashboardService _dashboardService;
 
         public AdminController(
             EduVisionContext dbContext,
             ILogger<AdminController> logger,
-            IQuotaService quotaService,
             IUserService userService,
             IDashboardService dashboardService)
         {
             _dbContext = dbContext;
             _logger = logger;
-            _quotaService = quotaService;
             _userService = userService;
             _dashboardService = dashboardService;
         }

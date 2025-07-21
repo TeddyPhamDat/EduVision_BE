@@ -1,5 +1,6 @@
 using EduVision.DBContext;
 using EduVision.Models;
+using EduVision.Models.Constants;
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
 using EduVision.Models.Entities.Enum;
@@ -41,27 +42,28 @@ namespace EduVision.Controllers
         /// </summary>
         [Authorize(Roles = "USER,MANAGER,ADMIN")]
         [HttpPost]
-        [ProducesResponseType(typeof(ApiResponse<int>), 202)]
+        [ProducesResponseType(typeof(ApiResponse<int>), HttpStatusCodes.Accepted)]
         public async Task<ActionResult> CreateVideo([FromBody] EducationRequestDto request)
         {
-            var userId = await GetAuthenticatedUserIdAsync();
+            var userId = GetAuthenticatedUserId(); // Fixed: removed unnecessary async
             if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+                return Unauthorized(ApiResponse<string>.Fail(ErrorMessages.Auth.UserIdNotFound, HttpStatusCodes.Unauthorized));
 
             var user = await _dbContext.Users.FindAsync(userId.Value);
             if (user == null)
-                return NotFound(ApiResponse<string>.Fail("User does not exist", 404));
+                return NotFound(ApiResponse<string>.Fail(ErrorMessages.Auth.UserDoesNotExist, HttpStatusCodes.NotFound));
 
             // Enforce video quota for non-manager users
             if ((Role)user.Role != Role.MANAGER)
             {
-                bool hasQuota = await _quotaService.CheckQuotaAsync(userId.Value, "video");
+                bool hasQuota = await _quotaService.CheckQuotaAsync(userId.Value, QuotaTypes.Video);
                 if (!hasQuota)
-                    return StatusCode(403, ApiResponse<string>.Fail("You have exceeded the number of video generations for the month", 403));
+                    return StatusCode(HttpStatusCodes.Forbidden, 
+                        ApiResponse<string>.Fail(ErrorMessages.Quota.VideoQuotaExceeded, HttpStatusCodes.Forbidden));
             }
 
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
-                return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
+                return BadRequest(ApiResponse<string>.Fail(ErrorMessages.Validation.SubjectAndChapterRequired, HttpStatusCodes.BadRequest));
 
             _logger.LogInformation("Starting video lesson generation for user: {UserId}, subject: {Subject}, chapter: {Chapter}, grade: {Grade}",
                 userId.Value, request.Subject, request.Chapter, request.Grade);
@@ -72,9 +74,9 @@ namespace EduVision.Controllers
                 var promptEntity = new Prompt
                 {
                     UserId = userId.Value,
-                    Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - video",
+                    Content = CreatePromptContent(request, "video"),
                     CreatedAt = DateTime.UtcNow,
-                    Status = "Processing"
+                    Status = StatusConstants.ProcessingStatus.Processing
                 };
                 _dbContext.Prompts.Add(promptEntity);
                 await _dbContext.SaveChangesAsync();
@@ -85,7 +87,7 @@ namespace EduVision.Controllers
                     PromptId = promptEntity.Promptid,
                     UserId = userId.Value,
                     Type = request.Subject,
-                    Status = "Processing"
+                    Status = StatusConstants.ProcessingStatus.Processing
                 };
                 _dbContext.Slides.Add(slideEntity);
                 await _dbContext.SaveChangesAsync();
@@ -95,7 +97,7 @@ namespace EduVision.Controllers
                 {
                     PromptId = promptEntity.Promptid,
                     SlideId = slideEntity.SlideId,
-                    Status = "Processing",
+                    Status = StatusConstants.ProcessingStatus.Processing,
                     CreatedAt = DateTime.UtcNow,
                     UserId = userId.Value
                 };
@@ -103,7 +105,7 @@ namespace EduVision.Controllers
                 await _dbContext.SaveChangesAsync();
 
                 // Increment quota - charge upfront to prevent abuse
-                await _quotaService.IncrementQuotaUsedAsync(userId.Value, "video");
+                await _quotaService.IncrementQuotaUsedAsync(userId.Value, QuotaTypes.Video);
 
                 // Enqueue the slide generation job with video flag set to true
                 await _kafkaProducerService.ProduceAsync(new SlideGenerationKafkaMessage
@@ -118,7 +120,7 @@ namespace EduVision.Controllers
                 var notification = new Notification
                 {
                     UserId = userId.Value,
-                    Message = "Your video generation request has been submitted and is being processed.",
+                    Message = SuccessMessages.Video.GenerationSubmitted,
                     CreatedAt = DateTime.UtcNow
                 };
                 _dbContext.Notifications.Add(notification);
@@ -126,12 +128,14 @@ namespace EduVision.Controllers
 
                 return Accepted(ApiResponse<int>.Success(
                     promptEntity.Promptid,
-                    "Video generation request accepted and is being processed. Use the returned ID to check the status."));
+                    SuccessMessages.Video.GenerationAccepted));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error initiating video generation for user: {UserId}", userId.Value);
-                return StatusCode(500, ApiResponse<string>.Fail($"Failed to start video generation: {ex.Message}", 500));
+                    return StatusCode(HttpStatusCodes.InternalServerError, 
+                    ApiResponse<string>.Fail($"{ErrorMessages.Processing.FailedToStartVideoGeneration}: {ex.Message}", 
+                    HttpStatusCodes.InternalServerError));
             }
         }
 
@@ -141,17 +145,17 @@ namespace EduVision.Controllers
         [Authorize]
         [HttpGet]
         public async Task<IActionResult> GetMyVideos(
-            [FromQuery] int page = 1, 
-            [FromQuery] int pageSize = 10,
+            [FromQuery] int page = ServiceConstants.Pagination.MinPage, 
+            [FromQuery] int pageSize = ServiceConstants.Pagination.DefaultPageSize,
             [FromQuery] string? status = null)
         {
-            var userId = await GetAuthenticatedUserIdAsync();
+            var userId = GetAuthenticatedUserId();
             if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+                return Unauthorized(ApiResponse<string>.Fail(ErrorMessages.Auth.UserIdNotFound, HttpStatusCodes.Unauthorized));
 
             // Validate pagination
-            if (page < 1) page = 1;
-            if (pageSize < 1 || pageSize > 100) pageSize = 10;
+            page = ValidatePage(page);
+            pageSize = ValidatePageSize(pageSize);
 
             var query = _dbContext.GeneratedVideos
                 .Include(v => v.Prompt)
@@ -174,7 +178,7 @@ namespace EduVision.Controllers
                 Status = v.Status,
                 CreatedAt = v.CreatedAt,
                 VideoUrl = v.VideoUrl,
-                PromptContent = v.Prompt?.Content
+                PromptContent = v.Prompt.Content
             }).ToList();
 
             var paginatedResponse = new PaginatedResponse<VideoResponse>
@@ -189,67 +193,33 @@ namespace EduVision.Controllers
             return Ok(ApiResponse<PaginatedResponse<VideoResponse>>.Success(paginatedResponse));
         }
 
-        /// <summary>
-        /// Get a specific video by ID.
-        /// </summary>
-        [Authorize]
-        [HttpGet("{videoId:int}")]
-        public async Task<IActionResult> GetVideo(int videoId)
-        {
-            var userId = await GetAuthenticatedUserIdAsync();
-            if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
+        #region Private Helper Methods
 
-            var video = await _dbContext.GeneratedVideos
-                .Include(v => v.Prompt)
-                .Where(v => v.GenerateVideoId == videoId && v.UserId == userId.Value)
-                .FirstOrDefaultAsync();
-
-            if (video == null)
-                return NotFound(ApiResponse<string>.Fail("Video not found", 404));
-
-            var response = new VideoResponse
-            {
-                GenerateVideoId = video.GenerateVideoId,
-                Status = video.Status,
-                CreatedAt = video.CreatedAt,
-                VideoUrl = video.VideoUrl,
-                PromptContent = video.Prompt?.Content
-            };
-
-            return Ok(ApiResponse<VideoResponse>.Success(response));
-        }
-
-        /// <summary>
-        /// Get the status of a specific video.
-        /// </summary>
-        [Authorize]
-        [HttpGet("{videoId:int}/status")]
-        public async Task<IActionResult> GetVideoStatus(int videoId)
-        {
-            var userId = await GetAuthenticatedUserIdAsync();
-            if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
-
-            var video = await _dbContext.GeneratedVideos
-                .Where(v => v.GenerateVideoId == videoId && v.UserId == userId.Value)
-                .FirstOrDefaultAsync();
-
-            if (video == null)
-                return NotFound(ApiResponse<string>.Fail("Video not found", 404));
-
-            return Ok(ApiResponse<object>.Success(new {
-                Status = video.Status,
-                Url = video.VideoUrl
-            }, "Video status retrieved successfully"));
-        }
-
-        private async Task<int?> GetAuthenticatedUserIdAsync()
+        private int? GetAuthenticatedUserId()
         {
             var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
                 return null;
             return userId;
         }
+
+        private static string CreatePromptContent(EducationRequestDto request, string type)
+        {
+            return $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {type}";
+        }
+
+        private static int ValidatePage(int page)
+        {
+            return page < ServiceConstants.Pagination.MinPage ? ServiceConstants.Pagination.MinPage : page;
+        }
+
+        private static int ValidatePageSize(int pageSize)
+        {
+            if (pageSize < 1 || pageSize > ServiceConstants.Pagination.MaxPageSize)
+                return ServiceConstants.Pagination.DefaultPageSize;
+            return pageSize;
+        }
+
+        #endregion
     }
 }

@@ -1,3 +1,4 @@
+using EduVision.Models.Constants; 
 using EduVision.Models.DTO.Response;
 using EduVision.Services.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -24,7 +25,7 @@ namespace EduVision.Controllers
         /// Get all available subjects for lesson generation.
         /// </summary>
         [HttpGet("subjects")]
-        [ResponseCache(Duration = 3600)] // Cache for 1 hour
+        [ResponseCache(Duration = ServiceConstants.Cache.SubjectsCacheDuration)] 
         public async Task<IActionResult> GetSubjects()
         {
             try
@@ -35,7 +36,8 @@ namespace EduVision.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching subjects");
-                return StatusCode(500, ApiResponse<string>.Fail($"Failed to fetch subjects: {ex.Message}", 500));
+                return StatusCode(HttpStatusCodes.InternalServerError, 
+                    ApiResponse<string>.Fail($"Failed to fetch subjects: {ex.Message}", HttpStatusCodes.InternalServerError));
             }
         }
 
@@ -43,12 +45,12 @@ namespace EduVision.Controllers
         /// Get all chapters for a given subject and grade.
         /// </summary>
         [HttpGet("chapters")]
-        [ResponseCache(Duration = 1800)] // Cache for 30 minutes
+        [ResponseCache(Duration = ServiceConstants.Cache.ChaptersCacheDuration)] 
         public async Task<IActionResult> GetChapters([FromQuery] string subject, [FromQuery] int? grade = null)
         {
             if (string.IsNullOrEmpty(subject))
             {
-                return BadRequest(ApiResponse<string>.Fail("Subject parameter is required", 400));
+                return BadRequest(ApiResponse<string>.Fail(ErrorMessages.Validation.SubjectRequired, HttpStatusCodes.BadRequest));
             }
 
             try
@@ -59,7 +61,8 @@ namespace EduVision.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error fetching chapters for subject: {Subject}", subject);
-                return StatusCode(500, ApiResponse<string>.Fail($"Failed to fetch chapters: {ex.Message}", 500));
+                return StatusCode(HttpStatusCodes.InternalServerError, 
+                    ApiResponse<string>.Fail($"Failed to fetch chapters: {ex.Message}", HttpStatusCodes.InternalServerError));
             }
         }
     }
