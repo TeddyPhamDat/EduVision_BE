@@ -46,7 +46,7 @@ namespace EduVision.Services.Messaging
                     var config = new ConsumerConfig
                     {
                         BootstrapServers = _kafkaConfig.BootstrapServers,
-                        GroupId = "video-result-group",
+                        GroupId = "video-result-group2",
                         AutoOffsetReset = AutoOffsetReset.Latest,
                         EnableAutoCommit = false, // Manual commit
                         SessionTimeoutMs = 10000,
