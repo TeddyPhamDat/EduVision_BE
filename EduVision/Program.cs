@@ -174,9 +174,16 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod());
 });
 
-// Ensure the Console logger is added (needed for Azure)
+// Ensure proper logging configuration for Azure
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole();
+
+
+// Configure logging to include more detailed information
+builder.Logging.Configure(options =>
+{
+    options.ActivityTrackingOptions = ActivityTrackingOptions.SpanId | ActivityTrackingOptions.TraceId | ActivityTrackingOptions.ParentId;
+});
 
 var app = builder.Build();
 
