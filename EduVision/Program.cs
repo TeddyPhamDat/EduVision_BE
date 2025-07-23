@@ -174,6 +174,10 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod());
 });
 
+// Ensure the Console logger is added (needed for Azure)
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+
 var app = builder.Build();
 
 // Enable Swagger UI for API exploration and testing.
