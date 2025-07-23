@@ -20,13 +20,43 @@ namespace EduVision.Services.Messaging
             _httpClient = httpClient;
             _projectId = config["Firebase:ProjectId"];
 
-            // Lấy service account từ cấu hình và serialize thành JSON string
+            // Get service account from configuration
             var serviceAccountSection = config.GetSection("Firebase:ServiceAccount");
             var serviceAccountObject = serviceAccountSection.Get<Dictionary<string, object>>();
+            
+            // Handle private key formatting for different environments
+            if (serviceAccountObject?.ContainsKey("private_key") == true)
+            {
+                var privateKey = serviceAccountObject["private_key"].ToString();
+                
+                // Handle both local and Azure environments
+                if (!string.IsNullOrEmpty(privateKey))
+                {
+                    // Replace escaped newlines with actual newlines
+                    privateKey = privateKey.Replace("\\n", "\n");
+                    
+                    // Ensure proper formatting
+                    if (!privateKey.StartsWith("-----BEGIN PRIVATE KEY-----"))
+                    {
+                        throw new InvalidOperationException("Invalid private key format");
+                    }
+                    
+                    serviceAccountObject["private_key"] = privateKey;
+                }
+            }
+            
             _serviceAccountJson = JsonSerializer.Serialize(serviceAccountObject);
-            // Load service account credentials từ JSON
-            _googleCredential = GoogleCredential.FromJson(_serviceAccountJson)
-                                .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
+            
+            try
+            {
+                // Load service account credentials from JSON
+                _googleCredential = GoogleCredential.FromJson(_serviceAccountJson)
+                                    .CreateScoped("https://www.googleapis.com/auth/firebase.messaging");
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to initialize Firebase credentials: {ex.Message}", ex);
+            }
         }
 
         public async Task SendSlideGeneratedAsync(string fcmToken, string slideUrl)
