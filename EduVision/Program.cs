@@ -174,12 +174,21 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod());
 });
 
-// Ensure proper logging configuration for Azure
+// Enhanced logging configuration for Azure
 builder.Logging.ClearProviders();
-builder.Logging.AddConsole();
 
+// Add Azure-specific logging for production
+if (!builder.Environment.IsDevelopment())
+{
+    builder.Logging.AddAzureWebAppDiagnostics();
+}
 
-// Configure logging to include more detailed information
+// Configure detailed logging
+builder.Logging.SetMinimumLevel(LogLevel.Information);
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore", LogLevel.Warning);
+
+// Configure activity tracking
 builder.Logging.Configure(options =>
 {
     options.ActivityTrackingOptions = ActivityTrackingOptions.SpanId | ActivityTrackingOptions.TraceId | ActivityTrackingOptions.ParentId;
