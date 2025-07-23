@@ -1,6 +1,5 @@
 using EduVision.DBContext;
 using EduVision.Models;
-using EduVision.Models.Constants; // Add this
 using EduVision.Models.DTO.Request;
 using EduVision.Models.DTO.Response;
 using EduVision.Models.Entities.Enum;
@@ -39,36 +38,35 @@ namespace EduVision.Controllers
         /// </summary>
         [Authorize(Roles = "USER,MANAGER,ADMIN")]
         [HttpPost]
-        [ProducesResponseType(typeof(ApiResponse<int>), HttpStatusCodes.Accepted)]
+        [ProducesResponseType(typeof(ApiResponse<int>), 202)]
         public async Task<ActionResult> CreateSlides([FromBody] EducationRequestDto request)
         {
-            var userId = GetAuthenticatedUserId(); 
+            var userId = await GetAuthenticatedUserIdAsync();
             if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail(ErrorMessages.Auth.UserIdNotFound, HttpStatusCodes.Unauthorized));
+                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
 
             var user = await _dbContext.Users.FindAsync(userId.Value);
             if (user == null)
-                return NotFound(ApiResponse<string>.Fail(ErrorMessages.Auth.UserDoesNotExist, HttpStatusCodes.NotFound));
+                return NotFound(ApiResponse<string>.Fail("User does not exist", 404));
 
             // Check quota for non-managers
             if ((Role)user.Role != Role.MANAGER)
             {
-                bool hasQuota = await _quotaService.CheckQuotaAsync(userId.Value, QuotaTypes.Slides);
+                bool hasQuota = await _quotaService.CheckQuotaAsync(userId.Value, "slides");
                 if (!hasQuota)
-                    return StatusCode(HttpStatusCodes.Forbidden, 
-                        ApiResponse<string>.Fail(ErrorMessages.Quota.SlideQuotaExceeded, HttpStatusCodes.Forbidden));
+                    return StatusCode(403, ApiResponse<string>.Fail("You have exceeded the number of slide generations for the month", 403));
             }
 
             if (string.IsNullOrEmpty(request.Subject) || string.IsNullOrEmpty(request.Chapter))
-                return BadRequest(ApiResponse<string>.Fail(ErrorMessages.Validation.SubjectAndChapterRequired, HttpStatusCodes.BadRequest));
+                return BadRequest(ApiResponse<string>.Fail("Subject and chapter parameters are required", 400));
 
             // Create database entry with "Processing" status
             var promptEntity = new Prompt
             {
                 UserId = userId.Value,
-                Content = CreatePromptContent(request, "slides"),
+                Content = $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - slides",
                 CreatedAt = DateTime.UtcNow,
-                Status = StatusConstants.ProcessingStatus.Processing
+                Status = "Processing"
             };
             _dbContext.Prompts.Add(promptEntity);
             await _dbContext.SaveChangesAsync();
@@ -85,13 +83,13 @@ namespace EduVision.Controllers
             var notification = new Notification
             {
                 UserId = userId.Value,
-                Message = SuccessMessages.Slides.GenerationSubmitted,
+                Message = "Your slide generation request has been submitted and is being processed.",
                 CreatedAt = DateTime.UtcNow
             };
             _dbContext.Notifications.Add(notification);
             await _dbContext.SaveChangesAsync();
 
-            return Accepted(ApiResponse<int>.Success(promptEntity.Promptid, SuccessMessages.Slides.GenerationAccepted));
+            return Accepted(ApiResponse<int>.Success(promptEntity.Promptid, "Slide generation request accepted and is being processed."));
         }
 
         /// <summary>
@@ -100,17 +98,17 @@ namespace EduVision.Controllers
         [Authorize]
         [HttpGet]
         public async Task<IActionResult> GetMySlides(
-            [FromQuery] int page = ServiceConstants.Pagination.MinPage, 
-            [FromQuery] int pageSize = ServiceConstants.Pagination.DefaultPageSize,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10,
             [FromQuery] string? status = null)
         {
-            var userId = GetAuthenticatedUserId();
+            var userId = await GetAuthenticatedUserIdAsync();
             if (userId == null)
-                return Unauthorized(ApiResponse<string>.Fail(ErrorMessages.Auth.UserIdNotFound, HttpStatusCodes.Unauthorized));
+                return Unauthorized(ApiResponse<string>.Fail("User ID not found in token", 401));
 
             // Validate pagination
-            page = ValidatePage(page);
-            pageSize = ValidatePageSize(pageSize);
+            if (page < 1) page = 1;
+            if (pageSize < 1 || pageSize > 100) pageSize = 10;
 
             var query = _dbContext.Slides
                 .Include(s => s.Prompt)
@@ -134,7 +132,7 @@ namespace EduVision.Controllers
                 Type = s.Type,
                 Url = s.Url,
                 Status = s.Status,
-                PromptContent = s.Prompt.Content
+                PromptContent = s.Prompt?.Content
             }).ToList();
 
             var paginatedResponse = new PaginatedResponse<SlideResponse>
@@ -149,33 +147,12 @@ namespace EduVision.Controllers
             return Ok(ApiResponse<PaginatedResponse<SlideResponse>>.Success(paginatedResponse));
         }
 
-        #region Private Helper Methods
-
-        private int? GetAuthenticatedUserId()
+        private async Task<int?> GetAuthenticatedUserIdAsync()
         {
             var userIdClaim = User.FindFirst("userId") ?? User.FindFirst(ClaimTypes.NameIdentifier);
             if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out var userId))
                 return null;
             return userId;
         }
-
-        private static string CreatePromptContent(EducationRequestDto request, string type)
-        {
-            return $"{request.Subject} - {request.Chapter} - Grade {request.Grade} - Template {request.Template} - {type}";
-        }
-
-        private static int ValidatePage(int page)
-        {
-            return page < ServiceConstants.Pagination.MinPage ? ServiceConstants.Pagination.MinPage : page;
-        }
-
-        private static int ValidatePageSize(int pageSize)
-        {
-            if (pageSize < 1 || pageSize > ServiceConstants.Pagination.MaxPageSize)
-                return ServiceConstants.Pagination.DefaultPageSize;
-            return pageSize;
-        }
-
-        #endregion
     }
 }
