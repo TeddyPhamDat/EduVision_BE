@@ -2,7 +2,6 @@
 using EduVision.DBContext;
 using EduVision.Models;
 using EduVision.Models.Config;
-using EduVision.Models.Constants; // Add this line
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
@@ -40,18 +39,18 @@ namespace EduVision.Services.Messaging
                 {
                     if (_connectionAttempted)
                     {
-                        await Task.Delay(TimeSpan.FromMinutes(ServiceConstants.Kafka.RetryDelayMinutes), stoppingToken);
+                        await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
                     }
                     _connectionAttempted = true;
 
                     var config = new ConsumerConfig
                     {
                         BootstrapServers = _kafkaConfig.BootstrapServers,
-                        GroupId = ServiceConstants.Kafka.VideoResultGroupId,
+                        GroupId = "video-result-group",
                         AutoOffsetReset = AutoOffsetReset.Latest,
                         EnableAutoCommit = false, // Manual commit
-                        SessionTimeoutMs = ServiceConstants.Kafka.SessionTimeoutMs,
-                        SocketTimeoutMs = ServiceConstants.Kafka.SocketTimeoutMs,
+                        SessionTimeoutMs = 10000,
+                        SocketTimeoutMs = 10000,
                     };
 
                     if (!string.IsNullOrEmpty(_kafkaConfig.SaslUsername) && !string.IsNullOrEmpty(_kafkaConfig.SaslPassword))
@@ -66,7 +65,7 @@ namespace EduVision.Services.Messaging
 
                     try
                     {
-                        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(ServiceConstants.Kafka.ConnectionTimeoutSeconds));
+                        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                         var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, stoppingToken);
 
                         consumer.Subscribe(_kafkaConfig.VideoResultTopic);
@@ -77,7 +76,7 @@ namespace EduVision.Services.Messaging
                         {
                             try
                             {
-                                var result = consumer.Consume(TimeSpan.FromSeconds(ServiceConstants.Kafka.ConsumeTimeoutSeconds));
+                                var result = consumer.Consume(TimeSpan.FromSeconds(1));
                                 if (result == null) continue;
 
                                 var message = JsonSerializer.Deserialize<VideoResultKafkaMessage>(result.Message.Value);
@@ -110,7 +109,7 @@ namespace EduVision.Services.Messaging
                             catch (Exception ex)
                             {
                                 _logger.LogError(ex, "Error in message consumption loop");
-                                await Task.Delay(ServiceConstants.Kafka.MessageDelayMs, stoppingToken);
+                                await Task.Delay(1000, stoppingToken);
                             }
                         }
                     }
@@ -134,7 +133,7 @@ namespace EduVision.Services.Messaging
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error in Kafka consumer. Will retry connection in 1 minute.");
-                    await Task.Delay(TimeSpan.FromMinutes(ServiceConstants.Kafka.RetryDelayMinutes), stoppingToken);
+                    await Task.Delay(TimeSpan.FromMinutes(1), stoppingToken);
                 }
             }
 
@@ -172,21 +171,21 @@ namespace EduVision.Services.Messaging
                 {
                     // Update status to completed
                     video.VideoUrl = message.VideoUrl;
-                    video.Status = StatusConstants.ProcessingStatus.Completed;
+                    video.Status = "Completed";
                     video.DurationSec = message.DurationSec;
                     video.Resolution = message.Resolution;
-                    
+
                     // Update prompt status
-                    prompt.Status = StatusConstants.ProcessingStatus.Completed;
-                    
+                    prompt.Status = "Completed";
+
                     // Update slide status if needed
                     var slides = await dbContext.Slides
                         .Where(s => s.PromptId == message.PromptId)
                         .ToListAsync();
-                        
+
                     foreach (var slide in slides)
                     {
-                        slide.Status = StatusConstants.ProcessingStatus.Completed;
+                        slide.Status = "Completed";
                     }
 
                     // Send FCM notification
@@ -196,16 +195,16 @@ namespace EduVision.Services.Messaging
                         var fcmService = scope.ServiceProvider.GetRequiredService<FirebaseCloudMessagingService>();
                         await fcmService.SendVideoGeneratedAsync(user.FcmToken, message.VideoUrl);
                     }
-                    logger.LogInformation("Video generation completed for PromptId: {PromptId}, URL: {VideoUrl}", 
+                    logger.LogInformation("Video generation completed for PromptId: {PromptId}, URL: {VideoUrl}",
                         message.PromptId, message.VideoUrl);
                 }
                 else
                 {
                     // Update status to failed
-                    video.Status = StatusConstants.ProcessingStatus.Failed;
-                    prompt.Status = StatusConstants.ProcessingStatus.Failed;
-                    
-                    logger.LogError("Video generation failed for PromptId: {PromptId}, Error: {Error}", 
+                    video.Status = "Failed";
+                    prompt.Status = "Failed";
+
+                    logger.LogError("Video generation failed for PromptId: {PromptId}, Error: {Error}",
                         message.PromptId, message.ErrorMessage);
                 }
 
